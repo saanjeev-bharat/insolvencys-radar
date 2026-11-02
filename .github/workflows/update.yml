@@ -1,0 +1,27 @@
+on:
+  schedule:
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx beautifulsoup4
+      - run: mkdir -p data docs/data
+      - run: python -m radar.collect
+        env:
+          RADAR_DB: data/radar.db
+          RADAR_USER_AGENT: "InsolvencyRadar/0.1 (github-actions)"
+      - name: Save results
+        run: |
+          git config user.name "radar-bot"
+          git config user.email "radar-bot@users.noreply.github.com"
+          git add -A data docs/data
+          git diff --cached --quiet || git commit -m "Daily data update"
+          git push
