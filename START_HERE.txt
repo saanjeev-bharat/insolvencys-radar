@@ -1,0 +1,49 @@
+INSOLVENCY RADAR - FREE ONLINE SETUP (about 15 minutes, no payment, no card)
+
+You need: an email address. That is all.
+
+STEP 1. Make a free GitHub account
+  - Go to github.com and click Sign up. Verify your email.
+
+STEP 2. Make a new project
+  - Click the + at the top right, then "New repository".
+  - Name: insolvency-radar
+  - Choose "Public". (Free sites need Public.)
+  - Click "Create repository".
+
+STEP 3. Upload the files
+  - Unzip insolvency_radar.zip on your computer.
+  - On the new repository page click "uploading an existing file".
+  - Open the unzipped folder and select EVERYTHING inside it: the folders
+    docs, radar, data, tests and the files requirements.txt, README.md.
+    Drag them all into the browser window. Wait until the upload finishes.
+  - Click "Commit changes".
+
+STEP 4. Add the daily job file (one small extra step)
+  - Click "Add file" then "Create new file".
+  - In the name box type exactly:  .github/workflows/update.yml
+    (typing the slashes makes the folders)
+  - Open the file "update.yml.txt" from the unzipped folder in Notepad,
+    copy everything, and paste it into the big box on GitHub.
+  - Click "Commit changes", then "Commit changes" again.
+
+STEP 5. Turn on the free website
+  - Click "Settings" (top row), then "Pages" in the left menu.
+  - Under "Branch" choose "main", and the folder "/docs". Click Save.
+  - Wait 2 minutes, refresh the page. Your web address appears at the top,
+    like  https://YOURNAME.github.io/insolvency-radar/
+
+STEP 6. Fetch real data now (do not wait for tomorrow)
+  - Click "Actions" (top row). If asked, click "I understand, enable".
+  - Click "Update data" on the left, then "Run workflow", then the green button.
+  - Wait about 2 minutes until you see a green tick.
+  - Open your web address again. Real notices appear if the collector worked.
+
+AFTER THAT
+  - It updates itself every day. You do nothing.
+  - On your phone, open the address and choose "Add to Home screen" to get an app icon.
+
+IF IT GOES WRONG
+  - A red cross in Actions means the collector failed. Click it, copy the red
+    error text, and send it to me. The first run often needs a small fix
+    because the collector has never been tested against the real ASIC site.

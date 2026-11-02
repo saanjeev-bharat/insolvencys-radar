@@ -1,0 +1,113 @@
+<title>Insolvency Radar</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c5c7a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="static/icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: sticky filter bar over a responsive grid of notice cards; contact block is the focal point of each card */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --fg:#14202b; --mute:#566573; --line:#dde3e9;
+  --accent:#0c5c7a; --accent-fg:#ffffff; --warn:#9a5b00; --warn-bg:#fdf1dc;
+  --liq:#8a2b2b; --liq-bg:#f9e6e4; --adm:#0c5c7a; --adm-bg:#e1f0f5; --rec:#5b4a8a; --rec-bg:#ece8f6; --auc:#2d6a3e; --auc-bg:#e2f1e6;
+  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e151b; --surface:#16202a; --fg:#e6edf3; --mute:#97a6b4; --line:#26333f;
+  --accent:#5cb8d6; --accent-fg:#06222c; --warn:#f0b45a; --warn-bg:#33270f;
+  --liq:#f0a0a0; --liq-bg:#3a1c1c; --adm:#7cc9e0; --adm-bg:#12303b; --rec:#c1b3ee; --rec-bg:#2a2340; --auc:#8fd3a2; --auc-bg:#163323; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e151b; --surface:#16202a; --fg:#e6edf3; --mute:#97a6b4; --line:#26333f;
+  --accent:#5cb8d6; --accent-fg:#06222c; --warn:#f0b45a; --warn-bg:#33270f;
+  --liq:#f0a0a0; --liq-bg:#3a1c1c; --adm:#7cc9e0; --adm-bg:#12303b; --rec:#c1b3ee; --rec-bg:#2a2340; --auc:#8fd3a2; --auc-bg:#163323; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--sans);
+  padding-block:0 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1100px;margin:0 auto}
+header{padding-block:24px 8px}
+h1{margin:0;font-size:24px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+header p{margin:6px 0 0;color:var(--mute);max-width:65ch}
+.demo{margin-top:12px;display:inline-block;background:var(--warn-bg);color:var(--warn);font-size:13px;padding:6px 10px;border-radius:4px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;padding-block:16px}
+.bar>*{min-width:0}
+input,select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+input{flex:1 1 220px}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.count{margin:0 0 12px;color:var(--mute);font-size:13px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.card h2{margin:0;font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:12px;font-weight:500;padding:2px 8px;border-radius:99px;letter-spacing:.02em}
+.t-liquidation{background:var(--liq-bg);color:var(--liq)}.t-administration{background:var(--adm-bg);color:var(--adm)}
+.t-receivership{background:var(--rec-bg);color:var(--rec)}.t-auction,.t-mortgagee_sale{background:var(--auc-bg);color:var(--auc)}
+.loc{background:transparent;border:1px solid var(--line);color:var(--mute)}
+.ids{font-family:var(--mono);font-size:12px;color:var(--mute);overflow-wrap:anywhere}
+.dates{font-size:13px;color:var(--mute)}.dates b{color:var(--warn);font-weight:600}
+.asset{font-size:14px}
+.contact{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;display:grid;gap:2px}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute)}
+.who{font-weight:500}.firm{color:var(--mute);font-size:14px}
+.line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.val{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere;user-select:all}
+button.copy{font:inherit;font-size:12px;color:var(--accent);background:transparent;border:1px solid var(--line);border-radius:4px;padding:1px 8px;cursor:pointer}
+.conf{font-size:12px;color:var(--mute);margin-top:4px}
+.card a{color:var(--accent)}
+.note{margin:0 0 8px;background:var(--warn-bg);color:var(--warn);font-size:13px;padding:6px 10px;border-radius:4px}
+.empty{padding:32px 0;color:var(--mute)}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Insolvency Radar</h1>
+  <p>Companies in liquidation, administration or receivership, plus insolvency auctions and mortgagee sales. Each card shows the appointed practitioner to contact.</p>
+</header>
+<div class="bar">
+  <input id="q" type="search" placeholder="Search name, suburb or asset" aria-label="Search">
+  <select id="state" aria-label="State"><option value="">All states</option><option>NSW</option><option>VIC</option><option>QLD</option><option>WA</option><option>SA</option><option>TAS</option><option>ACT</option><option>NT</option></select>
+  <select id="kind" aria-label="Type"><option value="">All types</option><option value="insolvency">Insolvency notices</option><option value="auction">Asset auctions</option><option value="mortgagee_sale">Mortgagee sales</option></select>
+</div>
+<p class="note" id="note" hidden></p>
+<p class="count" id="count"></p>
+<div class="grid" id="out"></div>
+</div>
+
+<script>
+var DATA=[];
+var LABEL={liquidation:"Liquidation",administration:"Administration",receivership:"Receivership",auction:"Asset auction",mortgagee_sale:"Mortgagee sale"};
+var KIND_LABEL=LABEL;
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function fmt(d){if(!d)return"n/a";var p=d.split("-");var m=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];return +p[2]+" "+m[+p[1]-1]+" "+p[0]}
+function line(label,val){return val?'<div class="line"><span class="label">'+label+'</span><span class="val">'+esc(val)+'</span><button class="copy" data-v="'+esc(val)+'" type="button">Copy</button></div>':""}
+function render(){
+  var q=document.getElementById("q").value.toLowerCase(),st=document.getElementById("state").value,k=document.getElementById("kind").value;
+  var rows=DATA.filter(function(r){return(!st||r.state===st)&&(!k||r.kind===k)&&(!q||(r.name+" "+(r.asset||"")+" "+r.postcode).toLowerCase().indexOf(q)>-1)});
+  document.getElementById("count").textContent=rows.length+" of "+DATA.length+" records";
+  document.getElementById("out").innerHTML=rows.length?rows.map(function(r){
+    return '<article class="card"><h2>'+esc(r.name)+'</h2>'+
+    '<div class="tags"><span class="tag t-'+r.status+'">'+esc(LABEL[r.status]||r.status)+'</span><span class="tag loc">'+esc(r.state)+' '+esc(r.postcode)+'</span></div>'+
+    (r.acn||r.abn?'<div class="ids">'+(r.acn?'ACN '+esc(r.acn):'')+(r.acn&&r.abn?' · ':'')+(r.abn?'ABN '+esc(r.abn):'')+'</div>':'')+
+    (r.asset?'<div class="asset">'+esc(r.asset)+'</div>':'')+
+    '<div class="dates">Notice '+fmt(r.notice)+' · <b>Next date '+fmt(r.deadline)+'</b></div>'+
+    '<div class="contact"><span class="label">Contact</span><span class="who">'+esc(r.person)+'</span><span class="firm">'+esc(r.firm)+'</span>'+line("Phone",r.phone)+line("Email",r.email)+'</div>'+
+    (r.url?'<div class="line"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">Source notice</a></div>':'')+'<div class="conf">Extraction confidence '+r.conf.toFixed(2)+'. Verify against the source notice.</div></article>';
+  }).join(""):'<p class="empty">No records yet. Notices are collected once a day. Check back after the next update.</p>';
+}
+document.addEventListener("input",function(e){if(e.target.id==="q")render()});
+document.addEventListener("change",function(e){if(e.target.id==="state"||e.target.id==="kind")render()});
+document.addEventListener("click",function(e){var b=e.target.closest("button.copy");if(!b)return;
+  try{navigator.clipboard.writeText(b.getAttribute("data-v")).then(function(){b.textContent="Copied"},function(){b.textContent="Select text"})}catch(x){b.textContent="Select text"}
+  setTimeout(function(){b.textContent="Copy"},1500)});
+function load(){
+  fetch("data/leads.json?v="+Date.now()).then(function(r){return r.json()}).then(function(j){
+    var m=j.meta||{},note=document.getElementById("note");
+    note.hidden=false;
+    note.textContent=m.sample?"These are fictional sample records. Real notices appear after the first daily update.":"Last updated "+(m.updated||"unknown")+". Verify every record against its source notice.";
+    DATA=(j.leads||[]).map(function(r){return{kind:r.kind,status:r.status||r.kind,name:r.entity_name||r.asset_summary||"Unnamed",acn:r.acn,abn:r.abn,state:r.state||"",postcode:r.postcode||"",notice:r.notice_date,deadline:r.deadline,asset:r.asset_summary,person:r.contact_name||"See notice",firm:r.contact_firm||"",phone:r.contact_phone,email:r.contact_email,conf:r.confidence||0,url:r.source_url}});
+    render();
+  }).catch(function(){document.getElementById("count").textContent="Could not load data."});
+}
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){})}
+load();
+</script>
