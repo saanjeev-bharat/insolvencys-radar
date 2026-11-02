@@ -1,6 +1,6 @@
 """Daily job: collect notices, then write the website data file."""
-from . import pipeline
-from .export_json import export
+import pipeline
+from export_json import export
 
 if __name__ == "__main__":
     print(f"collected {pipeline.run()} notices")

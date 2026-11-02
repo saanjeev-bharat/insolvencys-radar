@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0c5c7a">
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="static/icon-192.png">
+<link rel="icon" href="icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
 /* Layout: sticky filter bar over a responsive grid of notice cards; contact block is the focal point of each card */
@@ -100,7 +100,7 @@ document.addEventListener("click",function(e){var b=e.target.closest("button.cop
   try{navigator.clipboard.writeText(b.getAttribute("data-v")).then(function(){b.textContent="Copied"},function(){b.textContent="Select text"})}catch(x){b.textContent="Select text"}
   setTimeout(function(){b.textContent="Copy"},1500)});
 function load(){
-  fetch("data/leads.json?v="+Date.now()).then(function(r){return r.json()}).then(function(j){
+  fetch("leads.json?v="+Date.now()).then(function(r){return r.json()}).then(function(j){
     var m=j.meta||{},note=document.getElementById("note");
     note.hidden=false;
     note.textContent=m.sample?"These are fictional sample records. Real notices appear after the first daily update.":"Last updated "+(m.updated||"unknown")+". Verify every record against its source notice.";

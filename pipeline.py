@@ -1,6 +1,6 @@
 import sys
 
-from . import db, extract, sources as S
+import db, extract, sources as S
 
 
 def run(srcs=None, db_path=None) -> int:

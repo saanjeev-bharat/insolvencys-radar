@@ -4,15 +4,16 @@ import os
 import sys
 import time
 
-from . import db
+import db
 
 
-def export(path="docs/data/leads.json", sample=False):
+def export(path="leads.json", sample=False):
     with db.connect() as con:
         rows = db.search(con, limit=5000)
     for r in rows:
         r.pop("raw_text", None)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
     meta = {"updated": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()), "sample": sample, "count": len(rows)}
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"meta": meta, "leads": rows}, f, ensure_ascii=False)
