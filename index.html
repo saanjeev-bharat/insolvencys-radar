@@ -6,108 +6,193 @@
 <link rel="icon" href="icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: sticky filter bar over a responsive grid of notice cards; contact block is the focal point of each card */
+/* Layout: summary strip, one filter row, then a grid of company cards; each card ends with the appointed practitioner and ways to find their contact details */
 :root{
   --bg:#f3f5f7; --surface:#ffffff; --fg:#14202b; --mute:#566573; --line:#dde3e9;
-  --accent:#0c5c7a; --accent-fg:#ffffff; --warn:#9a5b00; --warn-bg:#fdf1dc;
-  --liq:#8a2b2b; --liq-bg:#f9e6e4; --adm:#0c5c7a; --adm-bg:#e1f0f5; --rec:#5b4a8a; --rec-bg:#ece8f6; --auc:#2d6a3e; --auc-bg:#e2f1e6;
+  --accent:#0c5c7a; --warn:#8a4f00; --warn-bg:#fdf1dc;
+  --cL:#8a2b2b; --cL-bg:#f9e6e4; --cA:#0c5c7a; --cA-bg:#e1f0f5; --cR:#7a4b0c; --cR-bg:#f6ecdc;
+  --cS:#5b4a8a; --cS-bg:#ece8f6; --new:#1d6b3a; --new-bg:#e2f1e6;
   --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0e151b; --surface:#16202a; --fg:#e6edf3; --mute:#97a6b4; --line:#26333f;
-  --accent:#5cb8d6; --accent-fg:#06222c; --warn:#f0b45a; --warn-bg:#33270f;
-  --liq:#f0a0a0; --liq-bg:#3a1c1c; --adm:#7cc9e0; --adm-bg:#12303b; --rec:#c1b3ee; --rec-bg:#2a2340; --auc:#8fd3a2; --auc-bg:#163323; color-scheme:dark}}
+  --accent:#5cb8d6; --warn:#f0b45a; --warn-bg:#33270f;
+  --cL:#f0a0a0; --cL-bg:#3a1c1c; --cA:#7cc9e0; --cA-bg:#12303b; --cR:#e8c28a; --cR-bg:#33280f;
+  --cS:#c1b3ee; --cS-bg:#2a2340; --new:#8fd3a2; --new-bg:#163323; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0e151b; --surface:#16202a; --fg:#e6edf3; --mute:#97a6b4; --line:#26333f;
-  --accent:#5cb8d6; --accent-fg:#06222c; --warn:#f0b45a; --warn-bg:#33270f;
-  --liq:#f0a0a0; --liq-bg:#3a1c1c; --adm:#7cc9e0; --adm-bg:#12303b; --rec:#c1b3ee; --rec-bg:#2a2340; --auc:#8fd3a2; --auc-bg:#163323; color-scheme:dark}
+  --accent:#5cb8d6; --warn:#f0b45a; --warn-bg:#33270f;
+  --cL:#f0a0a0; --cL-bg:#3a1c1c; --cA:#7cc9e0; --cA-bg:#12303b; --cR:#e8c28a; --cR-bg:#33280f;
+  --cS:#c1b3ee; --cS-bg:#2a2340; --new:#8fd3a2; --new-bg:#163323; color-scheme:dark}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--sans);
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--sans);
   padding-block:0 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .wrap{max-width:1100px;margin:0 auto}
-header{padding-block:24px 8px}
+header{padding-block:24px 4px}
 h1{margin:0;font-size:24px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
-header p{margin:6px 0 0;color:var(--mute);max-width:65ch}
-.demo{margin-top:12px;display:inline-block;background:var(--warn-bg);color:var(--warn);font-size:13px;padding:6px 10px;border-radius:4px}
+header p{margin:6px 0 0;color:var(--mute);max-width:68ch}
+.stats{display:flex;flex-wrap:wrap;gap:8px 22px;margin:16px 0 0;padding:0;list-style:none;font-size:14px;color:var(--mute)}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums;font-size:18px;font-weight:600;margin-right:4px}
 .bar{display:flex;flex-wrap:wrap;gap:8px;padding-block:16px}
 .bar>*{min-width:0}
-input,select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
-input{flex:1 1 220px}
-input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.count{margin:0 0 12px;color:var(--mute);font-size:13px}
-.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+input,select,button{font:inherit}
+input,select{color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+input{flex:1 1 260px}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.note{margin:0 0 8px;background:var(--warn-bg);color:var(--warn);font-size:13px;padding:6px 10px;border-radius:4px}
+.count{margin:0 0 12px;color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr))}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .card h2{margin:0;font-size:16px;font-weight:600;overflow-wrap:anywhere}
 .tags{display:flex;flex-wrap:wrap;gap:6px}
 .tag{font-size:12px;font-weight:500;padding:2px 8px;border-radius:99px;letter-spacing:.02em}
-.t-liquidation{background:var(--liq-bg);color:var(--liq)}.t-administration{background:var(--adm-bg);color:var(--adm)}
-.t-receivership{background:var(--rec-bg);color:var(--rec)}.t-auction,.t-mortgagee_sale{background:var(--auc-bg);color:var(--auc)}
-.loc{background:transparent;border:1px solid var(--line);color:var(--mute)}
+.k-L{background:var(--cL-bg);color:var(--cL)}.k-A{background:var(--cA-bg);color:var(--cA)}
+.k-R,.k-O,.k-E{background:var(--cR-bg);color:var(--cR)}.k-S{background:var(--cS-bg);color:var(--cS)}
+.t-new{background:var(--new-bg);color:var(--new)}
+.t-line{border:1px solid var(--line);color:var(--mute)}
 .ids{font-family:var(--mono);font-size:12px;color:var(--mute);overflow-wrap:anywhere}
-.dates{font-size:13px;color:var(--mute)}.dates b{color:var(--warn);font-weight:600}
-.asset{font-size:14px}
-.contact{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;display:grid;gap:2px}
+.meta{font-size:13px;color:var(--mute)}
+.meta strong{color:var(--fg);font-weight:500}
+.who{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;display:grid;gap:6px}
 .label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute)}
-.who{font-weight:500}.firm{color:var(--mute);font-size:14px}
-.line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.val{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere;user-select:all}
-button.copy{font:inherit;font-size:12px;color:var(--accent);background:transparent;border:1px solid var(--line);border-radius:4px;padding:1px 8px;cursor:pointer}
-.conf{font-size:12px;color:var(--mute);margin-top:4px}
-.card a{color:var(--accent)}
-.note{margin:0 0 8px;background:var(--warn-bg);color:var(--warn);font-size:13px;padding:6px 10px;border-radius:4px}
+.pname{font-weight:600}
+.firm{font-size:13px;color:var(--mute)}
+.who p{margin:0;font-size:13px;color:var(--mute)}
+.actions{display:flex;flex-wrap:wrap;gap:6px}
+.btn{font-size:13px;color:var(--accent);background:transparent;border:1px solid var(--line);border-radius:4px;padding:3px 10px;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--accent)}
+.more{display:block;margin:20px auto 0;padding:8px 20px;background:var(--surface);color:var(--accent);border:1px solid var(--line);border-radius:6px;cursor:pointer}
 .empty{padding:32px 0;color:var(--mute)}
+footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--mute);max-width:84ch;display:grid;gap:6px}
+footer p{margin:0}
+footer a{color:var(--accent)}
 </style>
 
 <div class="wrap">
 <header>
   <h1>Insolvency Radar</h1>
-  <p>Companies in liquidation, administration or receivership, plus insolvency auctions and mortgagee sales. Each card shows the appointed practitioner to contact.</p>
+  <p>Australian companies in liquidation, administration, receivership or strike-off, from ASIC's open data. Each card names the appointed practitioner where ASIC lists one.</p>
+  <ul class="stats" id="stats"></ul>
 </header>
 <div class="bar">
-  <input id="q" type="search" placeholder="Search name, suburb or asset" aria-label="Search">
+  <input id="q" type="search" placeholder="Search company, ACN, practitioner, suburb or postcode" aria-label="Search" autocomplete="off">
   <select id="state" aria-label="State"><option value="">All states</option><option>NSW</option><option>VIC</option><option>QLD</option><option>WA</option><option>SA</option><option>TAS</option><option>ACT</option><option>NT</option></select>
-  <select id="kind" aria-label="Type"><option value="">All types</option><option value="insolvency">Insolvency notices</option><option value="auction">Asset auctions</option><option value="mortgagee_sale">Mortgagee sales</option></select>
+  <select id="kind" aria-label="Type">
+    <option value="">All types</option><option value="L">Liquidation</option><option value="A">Administration</option>
+    <option value="R">Receivership or controller</option><option value="E">In external administration (older appointment)</option><option value="S">Strike-off in progress</option>
+  </select>
+  <select id="period" aria-label="Appointed"><option value="">Any date</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option></select>
 </div>
 <p class="note" id="note" hidden></p>
-<p class="count" id="count"></p>
+<p class="note" id="warn" hidden></p>
+<p class="count" id="count" aria-live="polite"></p>
 <div class="grid" id="out"></div>
+<button class="more" id="more" type="button" hidden>Show more</button>
+<footer>
+  <p>Sources: <a href="https://asic.gov.au/regulatory-resources/find-a-document/statistics/insolvency-statistics/insolvency-statistics-series-1-companies-entering-external-administration/" target="_blank" rel="noopener">ASIC insolvency statistics (Series 1 and 2)</a>,
+  <a href="https://www.data.gov.au/data/dataset/asic-companies" target="_blank" rel="noopener">ASIC Company Dataset</a> and
+  <a href="https://data.gov.au/data/dataset/asic-liquidator" target="_blank" rel="noopener">ASIC Liquidator Dataset</a>, published by the Australian Securities and Investments Commission. The two datasets on data.gov.au are licensed
+  <a href="https://creativecommons.org/licenses/by/3.0/au/" target="_blank" rel="noopener">CC BY 3.0 AU</a>.</p>
+  <p>ASIC publishes these weekly and the appointment records run about two weeks behind, so recent events may be missing. ASIC's data names the appointee but gives no phone or email. A firm name appears only when the appointee matches one registered liquidator exactly. Always confirm the appointment in ASIC's published notice before acting.</p>
+  <p>This site is independent and not endorsed by ASIC. It is not legal or financial advice.</p>
+</footer>
 </div>
 
 <script>
-var DATA=[];
-var LABEL={liquidation:"Liquidation",administration:"Administration",receivership:"Receivership",auction:"Asset auction",mortgagee_sale:"Mortgagee sale"};
-var KIND_LABEL=LABEL;
-function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
-function fmt(d){if(!d)return"n/a";var p=d.split("-");var m=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];return +p[2]+" "+m[+p[1]-1]+" "+p[0]}
-function line(label,val){return val?'<div class="line"><span class="label">'+label+'</span><span class="val">'+esc(val)+'</span><button class="copy" data-v="'+esc(val)+'" type="button">Copy</button></div>':""}
-function render(){
-  var q=document.getElementById("q").value.toLowerCase(),st=document.getElementById("state").value,k=document.getElementById("kind").value;
-  var rows=DATA.filter(function(r){return(!st||r.state===st)&&(!k||r.kind===k)&&(!q||(r.name+" "+(r.asset||"")+" "+r.postcode).toLowerCase().indexOf(q)>-1)});
-  document.getElementById("count").textContent=rows.length+" of "+DATA.length+" records";
-  document.getElementById("out").innerHTML=rows.length?rows.map(function(r){
-    return '<article class="card"><h2>'+esc(r.name)+'</h2>'+
-    '<div class="tags"><span class="tag t-'+r.status+'">'+esc(LABEL[r.status]||r.status)+'</span><span class="tag loc">'+esc(r.state)+' '+esc(r.postcode)+'</span></div>'+
-    (r.acn||r.abn?'<div class="ids">'+(r.acn?'ACN '+esc(r.acn):'')+(r.acn&&r.abn?' · ':'')+(r.abn?'ABN '+esc(r.abn):'')+'</div>':'')+
-    (r.asset?'<div class="asset">'+esc(r.asset)+'</div>':'')+
-    '<div class="dates">Notice '+fmt(r.notice)+' · <b>Next date '+fmt(r.deadline)+'</b></div>'+
-    '<div class="contact"><span class="label">Contact</span><span class="who">'+esc(r.person)+'</span><span class="firm">'+esc(r.firm)+'</span>'+line("Phone",r.phone)+line("Email",r.email)+'</div>'+
-    (r.url?'<div class="line"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">Source notice</a></div>':'')+'<div class="conf">Extraction confidence '+r.conf.toFixed(2)+'. Verify against the source notice.</div></article>';
-  }).join(""):'<p class="empty">No records yet. Notices are collected once a day. Check back after the next update.</p>';
+var PAGE=60, shown=PAGE, DATA=[], META={};
+var KIND={L:"Liquidation",A:"Administration",R:"Receivership or controller",O:"External administration",E:"In external administration",S:"Strike-off in progress"};
+var STATUS={EXAD:"Status: in external administration",SOFF:"Status: strike-off in progress",REGD:"Status: registered",DRGD:"Status: deregistered",NOAC:"Status: not active"};
+var NOTICES="https://publishednotices.asic.gov.au/browsesearch-notices/";
+var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+var SRC={appointments:"appointment records",company_status:"company status",liquidator_register:"liquidator register"};
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function n0(n){return Number(n||0).toLocaleString("en-AU")}
+function acnFmt(a){return a&&a.length===9?a.slice(0,3)+" "+a.slice(3,6)+" "+a.slice(6):a||""}
+function abnFmt(b){return b&&b.length===11?b.slice(0,2)+" "+b.slice(2,5)+" "+b.slice(5,8)+" "+b.slice(8):b||""}
+function fmt(d){if(!d)return"";var p=d.split("-");return p.length===3?(+p[2])+" "+MON[+p[1]-1]+" "+p[0]:d}
+function daysAgo(d){return (Date.now()-new Date(d+"T00:00:00Z").getTime())/864e5}
+function isNew(r){return META.baseline&&r.f>META.baseline&&daysAgo(r.f)<=14}
+function filtered(){
+  var q=$("q").value.trim().toLowerCase(), st=$("state").value, k=$("kind").value, pd=+$("period").value||0;
+  return DATA.filter(function(r){
+    if(st&&r.st!==st)return false;
+    if(k&&r.k!==k&&!(k==="R"&&r.k==="O"))return false;
+    if(pd&&!(r.d&&daysAgo(r.d)<=pd))return false;
+    return !q||r._q.indexOf(q)>-1;
+  });
 }
-document.addEventListener("input",function(e){if(e.target.id==="q")render()});
-document.addEventListener("change",function(e){if(e.target.id==="state"||e.target.id==="kind")render()});
-document.addEventListener("click",function(e){var b=e.target.closest("button.copy");if(!b)return;
-  try{navigator.clipboard.writeText(b.getAttribute("data-v")).then(function(){b.textContent="Copied"},function(){b.textContent="Select text"})}catch(x){b.textContent="Select text"}
-  setTimeout(function(){b.textContent="Copy"},1500)});
+function who(r){
+  var h='<div class="who"><span class="label">Appointed practitioner</span>';
+  if(r.ap){
+    h+='<span class="pname">'+esc(r.ap)+'</span>';
+    if(r.fm)h+='<span class="firm">'+esc(r.fm)+(r.pt?' · '+esc(r.pt):'')+' (ASIC register of liquidators)</span>';
+    h+='<p>ASIC’s data gives the name only. Find the phone or email through the firm, or in the published notice.</p>';
+  }else if(r.d){
+    h+='<p>No appointee is named in ASIC’s data for this company. The published notice names them.</p>';
+  }else{
+    h+='<p>The appointee and contact details are in ASIC’s published notice. Copy the ACN and search for it there.</p>';
+  }
+  h+='<div class="actions"><button class="btn" type="button" data-acn="'+esc(r.a)+'">Copy ACN</button>'+
+     '<a class="btn" href="'+NOTICES+'" target="_blank" rel="noopener">ASIC notices ↗</a>';
+  if(r.ap)h+='<a class="btn" href="https://www.google.com/search?q='+encodeURIComponent(r.ap+' '+(r.fm||'liquidator')+' contact')+'" target="_blank" rel="noopener">Search practitioner ↗</a>';
+  if(r.b)h+='<a class="btn" href="https://abr.business.gov.au/ABN/View?abn='+esc(r.b)+'" target="_blank" rel="noopener">ABN Lookup ↗</a>';
+  return h+'</div></div>';
+}
+function card(r){
+  var kind=r.p||KIND[r.k]||"", loc=[r.ar,r.st,r.pc].filter(Boolean).join(" ");
+  var ids='ACN '+esc(acnFmt(r.a))+(r.b?' · ABN '+esc(abnFmt(r.b)):'');
+  var meta=[];
+  if(loc)meta.push('<strong>'+esc(loc)+'</strong>');
+  if(r["in"])meta.push(esc(r["in"]));
+  var when=r.d?'Appointed '+esc(fmt(r.d))+(r.na>1?' ('+r.na+' appointments in period)':''):'Added to radar '+esc(fmt(r.f));
+  return '<article class="card"><h2>'+esc(r.n)+'</h2>'+
+  '<div class="tags"><span class="tag k-'+esc(r.k||"O")+'">'+esc(kind)+'</span>'+
+  (r.s&&STATUS[r.s]?'<span class="tag t-line">'+esc(STATUS[r.s])+'</span>':'')+(isNew(r)?'<span class="tag t-new">New</span>':'')+'</div>'+
+  '<div class="ids">'+ids+'</div>'+
+  (meta.length?'<div class="meta">'+meta.join(' · ')+'</div>':'')+
+  '<div class="meta">'+when+'</div>'+who(r)+'</article>';
+}
+function render(){
+  var rows=filtered(), part=rows.slice(0,shown);
+  $("count").textContent=n0(rows.length)+" of "+n0(DATA.length)+" companies";
+  $("out").innerHTML=part.length?part.map(card).join(""):'<p class="empty">No companies match. Try a shorter name or clear a filter.</p>';
+  $("more").hidden=rows.length<=shown;
+  $("more").textContent="Show "+n0(Math.min(PAGE,rows.length-shown))+" more";
+}
+function stats(){
+  if(META.sample){$("stats").innerHTML="";return}
+  var rec=DATA.filter(function(r){return r.d&&daysAgo(r.d)<=30}).length;
+  var named=DATA.filter(function(r){return r.ap}).length;
+  $("stats").innerHTML='<li><b>'+n0(DATA.length)+'</b>companies listed</li>'+
+    '<li><b>'+n0(rec)+'</b>appointed in the last 30 days</li>'+
+    '<li><b>'+n0(named)+'</b>with a named practitioner</li>';
+}
+function warn(){
+  var s=META.sources||{}, bad=Object.keys(s).filter(function(k){return s[k]!=="ok"});
+  if(!bad.length||META.sample){$("warn").hidden=true;return}
+  $("warn").hidden=false;
+  $("warn").textContent="Some data could not be collected this week ("+bad.map(function(k){return SRC[k]||k}).join(", ")+"). Records may be incomplete or out of date.";
+}
 function load(){
   fetch("leads.json?v="+Date.now()).then(function(r){return r.json()}).then(function(j){
-    var m=j.meta||{},note=document.getElementById("note");
-    note.hidden=false;
-    note.textContent=m.sample?"These are fictional sample records. Real notices appear after the first daily update.":"Last updated "+(m.updated||"unknown")+". Verify every record against its source notice.";
-    DATA=(j.leads||[]).map(function(r){return{kind:r.kind,status:r.status||r.kind,name:r.entity_name||r.asset_summary||"Unnamed",acn:r.acn,abn:r.abn,state:r.state||"",postcode:r.postcode||"",notice:r.notice_date,deadline:r.deadline,asset:r.asset_summary,person:r.contact_name||"See notice",firm:r.contact_firm||"",phone:r.contact_phone,email:r.contact_email,conf:r.confidence||0,url:r.source_url}});
-    render();
-  }).catch(function(){document.getElementById("count").textContent="Could not load data."});
+    META=j.meta||{}; DATA=j.leads||[];
+    DATA.forEach(function(r){r._q=[r.n,r.a,r.ap,r.fm,r.ar,r.pc,r["in"]].join(" ").toLowerCase()});
+    var note=$("note"); note.hidden=false;
+    note.textContent=META.sample?"These are fictional sample records. Real companies appear after the first weekly update.":"Data updated "+(META.updated||"unknown")+". Covers appointments from the last "+(META.months||12)+" months.";
+    stats(); warn(); render();
+  }).catch(function(){$("count").textContent="Could not load data. Reload the page."});
 }
+var timer;
+$("q").addEventListener("input",function(){clearTimeout(timer);timer=setTimeout(function(){shown=PAGE;render()},150)});
+["state","kind","period"].forEach(function(id){$(id).addEventListener("change",function(){shown=PAGE;render()})});
+$("more").addEventListener("click",function(){shown+=PAGE;render()});
+document.addEventListener("click",function(e){
+  var b=e.target.closest("button[data-acn]"); if(!b)return;
+  var txt=acnFmt(b.getAttribute("data-acn")), old=b.textContent;
+  function done(ok){b.textContent=ok?"Copied":"Select the ACN above";setTimeout(function(){b.textContent=old},1600)}
+  try{navigator.clipboard.writeText(txt).then(function(){done(true)},function(){done(false)})}catch(x){done(false)}
+});
 if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){})}
 load();
 </script>
