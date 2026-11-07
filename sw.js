@@ -1,5 +1,5 @@
 // Minimal service worker: network first, falls back to the last cached copy when offline.
-const CACHE = "radar-v1";
+const CACHE = "radar-v2";
 self.addEventListener("install", e => { self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(self.clients.claim()); });
 self.addEventListener("fetch", e => {

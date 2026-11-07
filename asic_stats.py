@@ -114,8 +114,19 @@ def category(atype):
 
 
 def _state(v):
-    s = str(v or "").strip().upper()
-    return s if s in {"NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"} else s[:3]
+    """Normalise ASIC state names to the abbreviations used by the website filters."""
+    s = str(v or "").strip().upper().replace(".", "")
+    aliases = {
+        "NEW SOUTH WALES": "NSW", "NSW": "NSW",
+        "VICTORIA": "VIC", "VIC": "VIC",
+        "QUEENSLAND": "QLD", "QLD": "QLD",
+        "WESTERN AUSTRALIA": "WA", "WA": "WA",
+        "SOUTH AUSTRALIA": "SA", "SA": "SA",
+        "TASMANIA": "TAS", "TAS": "TAS",
+        "AUSTRALIAN CAPITAL TERRITORY": "ACT", "ACT": "ACT",
+        "NORTHERN TERRITORY": "NT", "NT": "NT",
+    }
+    return aliases.get(s, "")
 
 
 def read_appointments(path, since=None):
@@ -150,6 +161,12 @@ def read_appointments(path, since=None):
             if since and d and d < since:
                 continue
             atype = str(g(row, "atype") or "").strip()
+            area = str(g(row, "area") or "").strip().title()
+            state = _state(g(row, "state")) or _state(g(row, "state_inc"))
+            # ASIC occasionally labels ACT-region records as AUS; use the area only
+            # when it explicitly identifies the Australian Capital Territory.
+            if not state and "AUSTRALIAN CAPITAL TERRITORY" in area.upper():
+                state = "ACT"
             out.append({
                 "acn": acn.zfill(9),
                 "name": str(g(row, "name") or "").strip(),
@@ -158,8 +175,8 @@ def read_appointments(path, since=None):
                 "cat": category(atype),
                 "date": d,
                 "industry": str(g(row, "industry") or "").strip(),
-                "state": _state(g(row, "state")) or _state(g(row, "state_inc")),
-                "area": str(g(row, "area") or "").strip().title(),
+                "state": state,
+                "area": area,
                 "postcode": re.sub(r"\D", "", str(g(row, "postcode") or ""))[:4],
             })
         info = {"sheet": ws.title, "header_row": hidx + 1,
