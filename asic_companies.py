@@ -93,7 +93,7 @@ def iter_rows(path):
         if not first:
             return
         tab = "\t" in first
-        kw = {"delimiter": "\t", "quoting": csv.QUOTE_NONE} if tab else {"delimiter": ","}
+        kw = {"delimiter": "\t", "quoting": cscollectv.QUOTE_NONE} if tab else {"delimiter": ","}
         header = [h.strip().strip('"') for h in next(csv.reader([first], **kw))]
         for fields in csv.reader(text, **kw):
             if fields:
@@ -129,8 +129,8 @@ def collect(rows, extra=None):
     for row in rows:
         code = _clean(row.get("Status")).upper()
         counts[code] += 1
-        if code not in WANTED and not extra:
-            continue
+       if code not in WANTED and acn not in extra:
+    continue
         if _clean(row.get("Current Name Indicator")).upper() == "N":
             continue  # a former name of a company already listed under its current name
         acn = re.sub(r"\D", "", row.get("ACN") or "")
