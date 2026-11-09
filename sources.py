@@ -8,6 +8,7 @@ Selectors below are starting points: site markup changes, so verify them.
   Auction houses           Pickles, Grays, Lawsons, etc.           (insolvency & bank-repossession asset sales)
   Mortgagee listings       realestate.com.au / domain.com.au       (agent listings tagged 'mortgagee')
 """
+import hashlib
 import os
 import time
 from typing import Iterator
@@ -54,7 +55,7 @@ class AsicNotices(Source):
                     continue
                 a = item.find("a", href=True)
                 url = httpx.URL(self.BASE).join(a["href"]).human_repr() if a else self.BASE
-                yield {"source": self.name, "source_ref": url + str(hash(text) % 10**8),
+                yield {"source": self.name, "source_ref": url + "#" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
                        "source_url": url, "text": text, "kind": self.kind}
 
 
