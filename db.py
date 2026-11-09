@@ -1,6 +1,8 @@
 
 """SQLite storage for Insolvency Radar.
+
 One table of distress leads, deduplicated by a stable key.
+Existing non-empty information is preserved during updates.
 """
 
 import hashlib
@@ -55,22 +57,12 @@ def connect(path: str | None = None):
     if directory:
         Path(directory).mkdir(parents=True, exist_ok=True)
 
-    con = sqlite3.connect(
-        target,
-        timeout=30
-    )
+    con = sqlite3.connect(target, timeout=30)
 
     try:
         con.row_factory = sqlite3.Row
-
-        # Wait up to 30 seconds if another operation
-        # temporarily locks the database.
         con.execute("PRAGMA busy_timeout=30000")
-
-        # Enforce foreign key constraints if added later.
         con.execute("PRAGMA foreign_keys=ON")
-
-        # Create tables and indexes if they do not exist.
         con.executescript(SCHEMA)
 
         yield con
@@ -87,7 +79,7 @@ def connect(path: str | None = None):
 
 def lead_id(source: str, source_ref: str) -> str:
     value = f"{source}|{source_ref}"
-    return hashlib.sha1(value.encode()).hexdigest()[:16]
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
 COLUMNS = [
@@ -115,21 +107,48 @@ COLUMNS = [
 
 
 def upsert(con, lead: dict) -> None:
+    if not isinstance(lead, dict):
+        raise TypeError("Lead must be a dictionary")
+
     row = {column: lead.get(column) for column in COLUMNS}
+
+    for required in ("id", "kind", "source"):
+        if not row[required] or not str(row[required]).strip():
+            raise ValueError(f"Lead is missing required field: {required}")
+
+    # Use the default confidence for new records.
+    if row["confidence"] is None:
+        row["confidence"] = 0.5
 
     placeholders = ",".join("?" for _ in COLUMNS)
 
-    updates = ",".join(
-        f"{column}=excluded.{column}"
-        for column in COLUMNS
-        if column != "id"
-    )
+    updates = []
+
+    for column in COLUMNS:
+        if column == "id":
+            continue
+
+        if column == "confidence" and lead.get("confidence") is None:
+            updates.append("confidence=leads.confidence")
+        elif column in ("kind", "source"):
+            updates.append(f"{column}=excluded.{column}")
+        else:
+            updates.append(
+                f"""
+                {column}=CASE
+                    WHEN excluded.{column} IS NOT NULL
+                    AND excluded.{column} != ''
+                    THEN excluded.{column}
+                    ELSE leads.{column}
+                END
+                """
+            )
 
     con.execute(
         f"""
         INSERT INTO leads ({','.join(COLUMNS)})
         VALUES ({placeholders})
-        ON CONFLICT(id) DO UPDATE SET {updates}
+        ON CONFLICT(id) DO UPDATE SET {','.join(updates)}
         """,
         [row[column] for column in COLUMNS],
     )
@@ -141,7 +160,7 @@ def search(
     state=None,
     status=None,
     q=None,
-    limit=200
+    limit=200,
 ):
     sql = "SELECT * FROM leads WHERE 1=1"
     args = []
@@ -152,13 +171,13 @@ def search(
 
     if state:
         sql += " AND state=?"
-        args.append(state.upper())
+        args.append(state.strip().upper())
 
     if status:
         sql += " AND status=?"
         args.append(status)
 
-    if q:
+    if q and str(q).strip():
         sql += """
         AND (
             entity_name LIKE ?
@@ -166,10 +185,24 @@ def search(
             OR suburb LIKE ?
         )
         """
-        args.extend([f"%{q}%"] * 3)
+        term = f"%{str(q).strip()}%"
+        args.extend([term] * 3)
 
-    sql += " ORDER BY notice_date DESC LIMIT ?"
-    args.append(max(1, min(int(limit), 5000)))
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 200
+
+    limit = max(1, min(limit, 5000))
+
+    sql += """
+        ORDER BY
+            notice_date DESC,
+            first_seen DESC,
+            entity_name COLLATE NOCASE ASC
+        LIMIT ?
+    """
+    args.append(limit)
 
     return [
         dict(row)
