@@ -26,30 +26,20 @@ def find_xlsx_url(html, base=PAGE):
         flags=re.I
     )
 
-    good = [
-        link for link in links
-        if "series-1" in link.lower()
-        and "series-2" in link.lower()
-    ]
-
-    if not good:
+    if not links:
         raise RuntimeError(
-            "could not find the Series 1 and 2 Excel link on ASIC's statistics page"
+            "Could not find an Excel workbook link on ASIC's statistics page"
         )
 
-    return urljoin(base, good[0].replace("&amp;", "&"))
-def fetch_workbook(dest):
-    """Download this week's workbook. Returns the URL used."""
-    import httpx
-    r = httpx.get(PAGE, headers={"User-Agent": C.UA}, timeout=60, follow_redirects=True)
-    r.raise_for_status()
-    url = find_xlsx_url(r.text)
-    C.download(url, dest)
-    return url
+    # Prefer a workbook mentioning both Series 1 and Series 2.
+    preferred = [
+        link for link in links
+        if "series" in link.lower()
+    ]
 
+    selected = preferred[0] if preferred else links[0]
 
-# ---------- reading the raw-data sheet ----------
-
+    return urljoin(base, selected.replace("&amp;", "&"))
 def _norm(s):
     return re.sub(r"[^a-z0-9]+", " ", str(s if s is not None else "").lower()).strip()
 
