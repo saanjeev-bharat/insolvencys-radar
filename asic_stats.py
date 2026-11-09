@@ -40,6 +40,33 @@ def find_xlsx_url(html, base=PAGE):
     selected = preferred[0] if preferred else links[0]
 
     return urljoin(base, selected.replace("&amp;", "&"))
+        
+def fetch_workbook(dest):
+    """Download the latest ASIC workbook. Returns the URL used."""
+    import httpx
+
+    response = httpx.get(
+        PAGE,
+        headers={"User-Agent": C.UA},
+        timeout=60,
+        follow_redirects=True
+    )
+    response.raise_for_status()
+
+    url = find_xlsx_url(response.text)
+    C.download(url, dest)
+
+    # Validate that the downloaded file is a readable Excel workbook.
+    import openpyxl
+    wb = openpyxl.load_workbook(
+        dest,
+        read_only=True,
+        data_only=True
+    )
+    wb.close()
+
+    return url
+
 def _norm(s):
     return re.sub(r"[^a-z0-9]+", " ", str(s if s is not None else "").lower()).strip()
 
