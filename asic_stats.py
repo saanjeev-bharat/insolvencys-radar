@@ -259,19 +259,57 @@ def latest_by_acn(appts):
     return best
 
 
+
 def load(months=12, path=None, workdir=None):
-    """Download (or use the local copy) and read recent appointments. Returns (latest_by_acn, info)."""
-    since = (datetime.date.today() - datetime.timedelta(days=int(months * 30.5))).isoformat()
+    """Download ASIC workbook, falling back to local copy if needed."""
+
+    since = (
+        datetime.date.today()
+        - datetime.timedelta(days=int(months * 30.5))
+    ).isoformat()
+
     url = ""
-    if path is None and os.path.exists(LOCAL):
-        path = LOCAL
-        url = "local file " + LOCAL
+
+    # Use an explicitly supplied workbook first.
     if path is None:
-        td = workdir or tempfile.mkdtemp()
-        path = os.path.join(td, "series.xlsx")
-        url = fetch_workbook(path)
-        print("appointments file:", url, "-", os.path.getsize(path) // (1 << 20), "MiB")
+        if os.path.exists(LOCAL):
+            path = LOCAL
+            url = "local file " + LOCAL
+        else:
+            td = workdir or tempfile.mkdtemp()
+            path = os.path.join(td, "series.xlsx")
+
+            try:
+                url = fetch_workbook(path)
+                print("Downloaded ASIC workbook:", url)
+
+            except Exception as exc:
+                print("ASIC download failed:", exc)
+
+                if os.path.exists(LOCAL):
+                    path = LOCAL
+                    url = "local fallback file " + LOCAL
+                    print("Using local ASIC workbook:", LOCAL)
+                else:
+                    raise RuntimeError(
+                        "ASIC download failed and asic_series.xlsx "
+                        "was not found in the repository."
+                    ) from exc
+
     appts, info = read_appointments(path, since=since)
-    info.update({"file": url, "since": since, "rows": len(appts)})
-    print("appointments since", since, ":", len(appts), "| sheet:", info["sheet"], "| columns:", info["columns"])
+
+    info.update({
+        "file": url or path,
+        "since": since,
+        "rows": len(appts)
+    })
+
+    print(
+        "ASIC appointments since", since,
+        ":", len(appts),
+        "| sheet:", info["sheet"],
+        "| columns:", info["columns"]
+    )
+
     return latest_by_acn(appts), info
+
