@@ -1,7 +1,9 @@
 import os
 
-from radar import db, pipeline, sources
-from radar.extract import extract_regex
+import db
+import pipeline
+import sources
+from extract import extract_regex
 
 HERE = os.path.dirname(__file__)
 SAMPLE = os.path.join(HERE, "sample_notices.txt")
