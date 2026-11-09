@@ -169,23 +169,44 @@ def load_previous(path):
 
 def build(found, counts, previous, baseline, today, source_url=""):
     leads = []
+
     for acn, rec in found.items():
-        rec = dict(rec)
-        rec["f"] = previous.get(acn) or today
-        leads.append(rec)
-    leads.sort(key=lambda r: r["n"])
-    leads.sort(key=lambda r: r["f"], reverse=True)
+        item = dict(rec)
+
+        item["a"] = item.get("a") or acn
+        item["n"] = item.get("n") or "Unknown company"
+        item["f"] = previous.get(acn) or today
+
+        leads.append(item)
+
+    leads.sort(
+        key=lambda item: (
+            item.get("f") or "",
+            (item.get("n") or "").casefold(),
+        ),
+        reverse=True,
+    )
+
     meta = {
         "kind": KIND,
         "sample": False,
-        "updated": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+        "updated": time.strftime(
+            "%Y-%m-%d %H:%M UTC",
+            time.gmtime(),
+        ),
         "baseline": baseline or today,
         "count": len(leads),
-        "by_status": dict(Counter(r["s"] for r in leads)),
+        "by_status": dict(
+            Counter(item.get("s", "") for item in leads)
+        ),
         "all_status_counts": dict(counts),
         "dataset_file": source_url,
     }
-    return {"meta": meta, "leads": leads}
+
+    return {
+        "meta": meta,
+        "leads": leads,
+    }
 
 
 def run(out="leads.json", url=None, path=None):
