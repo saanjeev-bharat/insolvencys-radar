@@ -16,7 +16,7 @@ import asic_companies as C
 
 PAGE = ("https://asic.gov.au/regulatory-resources/find-a-document/statistics/"
         "insolvency-statistics/insolvency-statistics-series-1-companies-entering-external-administration/")
-LOCAL = "asic_series.xlsx"
+LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "asic_series.xlsx")
 
 
 def find_xlsx_url(html, base=PAGE):
