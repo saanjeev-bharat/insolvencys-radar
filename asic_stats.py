@@ -38,8 +38,6 @@ def find_xlsx_url(html, base=PAGE):
         )
 
     return urljoin(base, good[0].replace("&amp;", "&"))
-
-
 def fetch_workbook(dest):
     """Download this week's workbook. Returns the URL used."""
     import httpx
