@@ -1,6 +1,7 @@
 import sys
 
 import db, extract, sources as S
+import asic_stats
 
 
 def run(srcs=None, db_path=None) -> int:
