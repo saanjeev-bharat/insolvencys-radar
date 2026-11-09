@@ -1,31 +1,42 @@
+
 services:
   - type: web
     name: insolvency-radar-api
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+
     disk:
       name: radar-data
       mountPath: /var/data
       sizeGB: 1
+
     envVars:
       - key: RADAR_SECRET_KEY
         generateValue: true
-      - key: DATABASE_URL
-        value: sqlite:////var/data/insolvency_radar.sqlite3
+
+      - key: RADAR_DB
+        value: /var/data/insolvency_radar.sqlite3
+
       - key: CORS_ORIGINS
         value: https://saanjeev-bharat.github.io
+
       - key: FRONTEND_URL
         value: https://saanjeev-bharat.github.io
+
       - key: STRIPE_SECRET_KEY
         sync: false
+
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+
       - key: STRIPE_PRICE_STARTER
         sync: false
+
       - key: STRIPE_PRICE_PROFESSIONAL
         sync: false
+
       - key: STRIPE_PRICE_BUSINESS
         sync: false
