@@ -68,38 +68,70 @@ def _find(h, patterns, avoid=()):
 
 
 def map_columns(header):
+    def map_columns(header):
     h = [_norm(x) for x in header]
+
     m = {
         "acn": _find(h, ["acn"], avoid=["appointee"]),
-        "name": _find(h, ["organisation name", "company name", "organization name", "entity name", "name"],
-                      avoid=["appointee", "industry", "anzsic"]),
+        "name": _find(
+            h,
+            ["organisation name", "company name", "organization name",
+             "entity name", "name"],
+            avoid=["appointee", "industry", "anzsic"]
+        ),
         "appointee": _find(h, ["appointee name", "appointee"], avoid=["acn"]),
-        "atype": _find(h, ["appointment type", "type of appointment", "appointment"],
-                       avoid=["date", "financial", "appointee"]),
-        "adate": _find(h, ["appointment start date", "start date", "appointment date", "date of appointment", "date"],
-                       avoid=["financial", "year", "end"]),
-        "area": _find(h, ["area", "suburb", "locality", "city", "town"], avoid=["industry"]),
+        "atype": _find(
+            h,
+            ["appointment type", "type of appointment", "appointment"],
+            avoid=["date", "financial", "appointee"]
+        ),
+        "adate": _find(
+            h,
+            ["appointment start date", "start date", "appointment date",
+             "date of appointment", "date"],
+            avoid=["financial", "year", "end"]
+        ),
+        "area": _find(
+            h,
+            ["area", "suburb", "locality", "city", "town"],
+            avoid=["industry"]
+        ),
         "postcode": _find(h, ["postcode", "post code"]),
     }
+
     ind = None
     for i, x in enumerate(h):
-        if "division" in x and any(k in x for k in ("desc", "name", "title")):
+        if "division" in x and any(
+            k in x for k in ("desc", "name", "title")
+        ):
             ind = i
             break
+
     if ind is None:
-        ind = _find(h, ["anzsic division", "division", "industry"], avoid=["code"])
+        ind = _find(
+            h, ["anzsic division", "division", "industry"],
+            avoid=["code"]
+        )
+
     m["industry"] = ind
+
     st = None
     for i, x in enumerate(h):
-        if "state" in x and any(k in x for k in ("business", "location", "principal", "place")):
+        if "state" in x and any(
+            k in x for k in ("business", "location", "principal", "place")
+        ):
             st = i
             break
+
     if st is None:
         st = _find(h, ["state"], avoid=["incorporation"])
-    m["state"] = st
-    m["state_inc"] = _find(h, ["state of incorporation", "incorporation"])
-    return m
 
+    m["state"] = st
+    m["state_inc"] = _find(
+        h, ["state of incorporation", "incorporation"]
+    )
+
+    return m
 
 def _date(v):
     if isinstance(v, datetime.datetime):
