@@ -68,7 +68,7 @@ def _find(h, patterns, avoid=()):
 
 
 def map_columns(header):
-    def map_columns(header):
+    
     h = [_norm(x) for x in header]
 
     m = {
