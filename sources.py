@@ -1,82 +1,223 @@
-"""Source adapters. Each yields dicts with at least: source, source_ref, text.
 
-All sources are public. Check each site's terms of use and robots.txt before
-scheduled scraping, and prefer official feeds/APIs/bulk datasets where offered.
-Selectors below are starting points: site markup changes, so verify them.
+"""Source adapters for Insolvency Radar.
 
-  ASIC Published Notices   https://publishednotices.asic.gov.au   (liquidator/administrator/receiver appointments)
-  Auction houses           Pickles, Grays, Lawsons, etc.           (insolvency & bank-repossession asset sales)
-  Mortgagee listings       realestate.com.au / domain.com.au       (agent listings tagged 'mortgagee')
+Each source yields dictionaries containing:
+    source, source_ref, text, kind
+
+Use official datasets and approved feeds wherever possible.
+Do not enable automated website collection without checking the
+relevant site's access terms and obtaining any required permission.
 """
-import hashlib
+
+
 import os
 import time
 from typing import Iterator
+from urllib.parse import urljoin, urlparse
 
 
-UA = os.environ.get("RADAR_USER_AGENT", "InsolvencyRadar/0.1 (contact: set-your-email)")
-DELAY = float(os.environ.get("RADAR_DELAY", "2.0"))  # be polite
+def _env_float(name, default, minimum=0.0):
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a valid number")
+
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+
+    return value
+
+
+def _env_int(name, default, minimum=0, maximum=5):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a whole number")
+
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"{name} must be between {minimum} and {maximum}"
+        )
+
+    return value
+
+
+UA = os.environ.get(
+    "RADAR_USER_AGENT",
+    "InsolvencyRadar/1.0",
+).strip()
+
+DELAY = _env_float("RADAR_DELAY", "2.0")
+MAX_RETRIES = _env_int("RADAR_MAX_RETRIES", "3")
+
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _get(url: str, **params) -> str:
-    import httpx  # lazy: only needed for live sources
-    time.sleep(DELAY)
-    r = httpx.get(url, params=params, headers={"User-Agent": UA}, timeout=30, follow_redirects=True)
-    r.raise_for_status()
-    return r.text
+    """Fetch a page with a timeout and limited retries."""
+
+    import httpx
+
+    last_error = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        if DELAY:
+            time.sleep(DELAY)
+
+        try:
+            response = httpx.get(
+                url,
+                params=params,
+                headers={"User-Agent": UA},
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                follow_redirects=True,
+            )
+
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                response.raise_for_status()
+
+            response.raise_for_status()
+            return response.text
+
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+
+            if exc.response.status_code not in RETRYABLE_STATUS_CODES:
+                raise
+
+            retry_after = exc.response.headers.get("Retry-After")
+
+            if retry_after:
+                try:
+                    wait = min(float(retry_after), 30.0)
+                except ValueError:
+                    wait = min(2 ** attempt, 30.0)
+            else:
+                wait = min(2 ** attempt, 30.0)
+
+            if attempt < MAX_RETRIES:
+                time.sleep(wait)
+                continue
+
+            raise
+
+        if attempt < MAX_RETRIES:
+            time.sleep(min(2 ** attempt, 30.0))
+
+    raise RuntimeError(
+        f"Request failed after {MAX_RETRIES + 1} attempts: {url}"
+    ) from last_error
+
+
+def _absolute_url(base, href):
+    """Resolve a listing link safely."""
+    if not href:
+        return base
+
+    result = urljoin(base, href)
+
+    if urlparse(result).scheme not in ("http", "https"):
+        return base
+
+    return result
 
 
 class Source:
     name = "base"
     kind = "insolvency"
 
-    def fetch(self) -> Iterator[dict]:  # pragma: no cover
+    def fetch(self) -> Iterator[dict]:
         raise NotImplementedError
 
 
 class AsicNotices(Source):
-    """ASIC published notices (external administration / winding up)."""
+    """ASIC Published Notices adapter.
+
+    Automatic HTML collection is intentionally disabled until the
+    access conditions, supported interface and live page structure
+    have been verified.
+    """
+
     name = "asic_notices"
     kind = "insolvency"
-    BASE = "https://publishednotices.asic.gov.au"
-
-    def __init__(self, query_path="/browse", pages=5):
-        self.query_path, self.pages = query_path, pages
 
     def fetch(self):
-        import httpx
-        from bs4 import BeautifulSoup
-        for page in range(1, self.pages + 1):
-            html = _get(self.BASE + self.query_path, page=page)
-            soup = BeautifulSoup(html, "html.parser")
-            for item in soup.select("article, .notice, tr"):  # adjust to live markup
-                text = item.get_text(" ", strip=True)
-                if len(text) < 80:
-                    continue
-                a = item.find("a", href=True)
-                url = httpx.URL(self.BASE).join(a["href"]).human_repr() if a else self.BASE
-                yield {"source": self.name, "source_ref": url + "#" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
-                       "source_url": url, "text": text, "kind": self.kind}
+        raise RuntimeError(
+            "ASIC Published Notices automated collection is disabled "
+            "pending verification of authorised access and the live "
+            "search interface."
+        )
 
 
 class AuctionSite(Source):
-    """Generic insolvency-auction listing page. Configure per site."""
+    """Configurable adapter for an approved auction listing page."""
+
     kind = "auction"
 
-    def __init__(self, name, url, item_selector, link_selector="a"):
-        self.name, self.url = name, url
-        self.item_selector, self.link_selector = item_selector, link_selector
+    def __init__(
+        self,
+        name,
+        url,
+        item_selector,
+        link_selector="a",
+        min_text_length=40,
+    ):
+        parsed = urlparse(url)
+
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("Auction source requires a valid HTTP(S) URL")
+
+        if not name or not item_selector:
+            raise ValueError("Source name and item selector are required")
+
+        if min_text_length < 1:
+            raise ValueError("min_text_length must be positive")
+
+        self.name = name
+        self.url = url
+        self.item_selector = item_selector
+        self.link_selector = link_selector
+        self.min_text_length = min_text_length
 
     def fetch(self):
-        import httpx
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(_get(self.url), "html.parser")
+
+        html = _get(self.url)
+        soup = BeautifulSoup(html, "html.parser")
+
+        seen = set()
+
         for item in soup.select(self.item_selector):
             text = item.get_text(" ", strip=True)
-            a = item.select_one(self.link_selector)
-            url = httpx.URL(self.url).join(a["href"]).human_repr() if a and a.get("href") else self.url
-            yield {"source": self.name, "source_ref": url, "source_url": url,
-                   "text": text, "kind": self.kind}
+
+            if len(text) < self.min_text_length:
+                continue
+
+            link = item.select_one(self.link_selector)
+
+            href = (
+                link.get("href")
+                if link and link.get("href")
+                else None
+            )
+
+            item_url = _absolute_url(self.url, href)
+
+            if item_url in seen:
+                continue
+
+            seen.add(item_url)
+
+            yield {
+                "source": self.name,
+                "source_ref": item_url,
+                "source_url": item_url,
+                "text": text,
+                "kind": self.kind,
+            }
 
 
 class MortgageeListings(AuctionSite):
@@ -84,23 +225,39 @@ class MortgageeListings(AuctionSite):
 
 
 class FileSource(Source):
-    """Offline/testing source: one notice per blank-line-separated block in a text file."""
+    """Offline/testing source: one notice per blank-line-separated block."""
+
     def __init__(self, path, kind="insolvency"):
-        self.path, self.kind, self.name = path, kind, f"file:{os.path.basename(path)}"
+        self.path = path
+        self.kind = kind
+        self.name = f"file:{os.path.basename(path)}"
 
     def fetch(self):
-        blocks = open(self.path, encoding="utf-8").read().split("\n\n")
-        for i, b in enumerate(x.strip() for x in blocks):
-            if b:
-                yield {"source": self.name, "source_ref": str(i), "source_url": None,
-                       "text": b, "kind": self.kind}
+        with open(self.path, encoding="utf-8") as file:
+            content = file.read()
+
+        blocks = content.split("\n\n")
+
+        for index, block in enumerate(blocks):
+            text = block.strip()
+
+            if not text:
+                continue
+
+            yield {
+                "source": self.name,
+                "source_ref": str(index),
+                "source_url": None,
+                "text": text,
+                "kind": self.kind,
+            }
 
 
 def default_sources() -> list[Source]:
-    return [
-        AsicNotices(),
-        # Examples - confirm URLs/selectors against the live sites:
-        # AuctionSite("pickles", "https://www.pickles.com.au/...", ".listing-card"),
-        # AuctionSite("grays", "https://www.grays.com/...", ".lot"),
-        # MortgageeListings("mortgagee_domain", "https://www.domain.com.au/...", "[data-testid=listing-card]"),
-    ]
+    """Return approved, configured live sources."""
+
+    # ASIC Published Notices is deliberately not enabled here.
+    # Add approved and verified sources only after their access
+    # conditions and live selectors have been checked.
+
+    return []
