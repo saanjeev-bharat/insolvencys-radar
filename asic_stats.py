@@ -31,7 +31,6 @@ def find_xlsx_url(html, base=PAGE):
             "Could not find an Excel workbook link on ASIC's statistics page"
         )
 
-    # Prefer a workbook mentioning both Series 1 and Series 2.
     preferred = [
         link for link in links
         if "series" in link.lower()
@@ -40,7 +39,6 @@ def find_xlsx_url(html, base=PAGE):
     selected = preferred[0] if preferred else links[0]
 
     return urljoin(base, selected.replace("&amp;", "&"))
-        
 def fetch_workbook(dest):
     """Download the latest ASIC workbook. Returns the URL used."""
     import httpx
