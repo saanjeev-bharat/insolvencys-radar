@@ -1,6 +1,9 @@
+
 import sys
 
-import db, extract, sources as S
+import db
+import extract
+import sources as S
 import asic_stats
 
 
@@ -16,6 +19,9 @@ def import_asic_stats(con):
     }
 
     for acn, item in records.items():
+        if item.get("cat") not in status_map:
+            continue
+
         source = "ASIC Series 1 and 2"
 
         raw_text = (
@@ -28,7 +34,7 @@ def import_asic_stats(con):
         lead = {
             "id": db.lead_id(source, acn),
             "kind": "insolvency",
-            "status": status_map.get(item.get("cat")),
+            "status": status_map[item.get("cat")],
             "entity_name": item.get("name"),
             "acn": acn,
             "state": item.get("state"),
@@ -58,19 +64,34 @@ def run(srcs=None, db_path=None) -> int:
     n = 0
 
     with db.connect(db_path) as con:
+
         if use_default_sources:
             try:
                 n += import_asic_stats(con)
             except Exception as e:
-                print(f"[warn] ASIC statistics: {e}", file=sys.stderr)
+                print(
+                    f"[warn] ASIC statistics: {e}",
+                    file=sys.stderr,
+                )
 
         for src in srcs:
             try:
                 for item in src.fetch():
-                    lead = extract.extract_regex(item["text"], item["kind"])
-                    lead = extract.refine_with_claude(item["text"], lead)
 
-                    if item["kind"] != "insolvency" and not lead.get("status"):
+                    lead = extract.extract_regex(
+                        item["text"],
+                        item["kind"],
+                    )
+
+                    lead = extract.refine_with_claude(
+                        item["text"],
+                        lead,
+                    )
+
+                    if (
+                        item["kind"] != "insolvency"
+                        and not lead.get("status")
+                    ):
                         lead["status"] = item["kind"]
 
                     if not (
@@ -81,7 +102,10 @@ def run(srcs=None, db_path=None) -> int:
                         continue
 
                     lead.update(
-                        id=db.lead_id(item["source"], item["source_ref"]),
+                        id=db.lead_id(
+                            item["source"],
+                            item["source_ref"],
+                        ),
                         source=item["source"],
                         source_url=item.get("source_url"),
                     )
@@ -90,7 +114,10 @@ def run(srcs=None, db_path=None) -> int:
                     n += 1
 
             except Exception as e:
-                print(f"[warn] {src.name}: {e}", file=sys.stderr)
+                print(
+                    f"[warn] {src.name}: {e}",
+                    file=sys.stderr,
+                )
 
     return n
 
