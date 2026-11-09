@@ -20,10 +20,23 @@ LOCAL = "asic_series.xlsx"
 
 
 def find_xlsx_url(html, base=PAGE):
-    links = re.findall(r'href=["\']([^"\']+\.xlsx[^"\']*)["\']', html, flags=re.I)
-    good = [l for l in links if "series-1" in l.lower() and "series-2" in l.lower()]
+    links = re.findall(
+        r'href=["\']([^"\']+\.xlsx(?:\?[^"\']*)?)["\']',
+        html,
+        flags=re.I
+    )
+
+    good = [
+        link for link in links
+        if "series-1" in link.lower()
+        and "series-2" in link.lower()
+    ]
+
     if not good:
-        raise RuntimeError("could not find the Series 1 and 2 Excel link on ASIC's statistics page")
+        raise RuntimeError(
+            "could not find the Series 1 and 2 Excel link on ASIC's statistics page"
+        )
+
     return urljoin(base, good[0].replace("&amp;", "&"))
 
 
