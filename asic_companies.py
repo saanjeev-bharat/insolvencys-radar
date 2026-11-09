@@ -1,11 +1,14 @@
+
 """Companies in external administration or strike-off, from ASIC's open Company Dataset.
 
-Source: "ASIC - Company Dataset" on data.gov.au, licensed CC BY 3.0 AU.
-Status codes (from ASIC's data dictionary):
-    EXAD  External administration (in receivership/liquidation)
-    SOFF  Strike-off action in progress
-The file is tab-separated (company names can contain commas) and may be zipped.
+Source: ASIC Company Dataset on data.gov.au.
+Licence: CC BY 3.0 AU.
+
+Status codes:
+    EXAD - External administration
+    SOFF - Strike-off action in progress
 """
+
 import csv
 import datetime
 import io
@@ -17,131 +20,263 @@ import tempfile
 import time
 import zipfile
 from collections import Counter
+from contextlib import ExitStack
 
 PACKAGE_ID = "7b8656f9-606d-4337-af29-66b89b2eeefb"
 API = f"https://data.gov.au/data/api/3/action/package_show?id={PACKAGE_ID}"
+
 WANTED = ("EXAD", "SOFF")
-UA = os.environ.get("RADAR_USER_AGENT", "InsolvencyRadar/0.2 (github-actions)")
+UA = os.environ.get(
+    "RADAR_USER_AGENT",
+    "InsolvencyRadar/0.2 (github-actions)",
+)
 KIND = "asic_company_dataset"
 
 
-# ---------- finding and downloading the file ----------
+# ---------- Finding and downloading the file ----------
 
 def pick_resource(resources):
-    """Choose the current Company Dataset file from the dataset's resource list."""
-    cands = []
-    for r in resources or []:
-        url = (r.get("url") or "").strip()
+    """Choose the most recent CSV or ZIP Company Dataset resource."""
+    candidates = []
+
+    for resource in resources or []:
+        url = (resource.get("url") or "").strip()
+
         if not url:
             continue
-        fmt = (r.get("format") or "").strip().lower()
-        low = url.lower().split("?")[0]
-        if fmt in ("csv", "zip") or low.endswith((".csv", ".zip")):
-            cands.append(r)
-    if not cands:
-        raise RuntimeError("no CSV or ZIP file found in the dataset listing")
 
-    def key(r):
-        text = ((r.get("name") or "") + " " + (r.get("description") or "")).lower()
-        return (1 if "current" in text else 0, r.get("last_modified") or r.get("created") or "")
+        fmt = (resource.get("format") or "").strip().lower()
+        clean_url = url.lower().split("?")[0]
 
-    return max(cands, key=key)["url"]
+        if fmt in ("csv", "zip") or clean_url.endswith((".csv", ".zip")):
+            candidates.append(resource)
+
+    if not candidates:
+        raise RuntimeError(
+            "No CSV or ZIP file found in the dataset listing"
+        )
+
+    def resource_key(resource):
+        description = (
+            (resource.get("name") or "")
+            + " "
+            + (resource.get("description") or "")
+        ).lower()
+
+        return (
+            1 if "current" in description else 0,
+            resource.get("last_modified")
+            or resource.get("created")
+            or "",
+        )
+
+    selected = max(candidates, key=resource_key)
+    return selected["url"]
 
 
 def fetch_listing(package_id=PACKAGE_ID):
     import httpx
-    api = f"https://data.gov.au/data/api/3/action/package_show?id={package_id}"
-    r = httpx.get(api, headers={"User-Agent": UA}, timeout=60, follow_redirects=True)
-    r.raise_for_status()
-    data = r.json()
+
+    api = (
+        "https://data.gov.au/data/api/3/action/package_show"
+        f"?id={package_id}"
+    )
+
+    response = httpx.get(
+        api,
+        headers={"User-Agent": UA},
+        timeout=60,
+        follow_redirects=True,
+    )
+
+    response.raise_for_status()
+    data = response.json()
+
     if not data.get("success"):
-        raise RuntimeError("data.gov.au did not return the dataset listing")
+        raise RuntimeError(
+            "data.gov.au did not return the dataset listing"
+        )
+
     return data["result"]["resources"]
 
 
 def download(url, dest):
     import httpx
-    last = None
+
+    last_error = None
+
     for attempt in range(3):
         try:
-            with httpx.stream("GET", url, headers={"User-Agent": UA},
-                              timeout=httpx.Timeout(60.0, read=600.0), follow_redirects=True) as r:
-                r.raise_for_status()
-                with open(dest, "wb") as f:
-                    for chunk in r.iter_bytes(1 << 20):
-                        f.write(chunk)
+            with httpx.stream(
+                "GET",
+                url,
+                headers={"User-Agent": UA},
+                timeout=httpx.Timeout(60.0, read=600.0),
+                follow_redirects=True,
+            ) as response:
+
+                response.raise_for_status()
+
+                with open(dest, "wb") as output:
+                    for chunk in response.iter_bytes(1 << 20):
+                        output.write(chunk)
+
+            if os.path.getsize(dest) == 0:
+                raise RuntimeError("Downloaded dataset is empty")
+
             return
-        except Exception as e:  # retry a few times
-            last = e
+
+        except Exception as error:
+            last_error = error
+
+            if os.path.exists(dest):
+                os.remove(dest)
+
             time.sleep(5 * (attempt + 1))
-    raise RuntimeError(f"download failed: {last}")
+
+    raise RuntimeError(f"Download failed: {last_error}")
 
 
-# ---------- reading the file ----------
+# ---------- Reading the file ----------
 
 def iter_rows(path):
-    """Yield one dict per data row. Handles .zip or plain files, tab or comma separated."""
-    if zipfile.is_zipfile(path):
-        zf = zipfile.ZipFile(path)
-        names = [n for n in zf.namelist() if n.lower().endswith((".csv", ".txt", ".tsv"))] or zf.namelist()
-        raw = zf.open(names[0])
-    else:
-        raw = open(path, "rb")
-    text = io.TextIOWrapper(raw, encoding="utf-8-sig", errors="replace", newline="")
-    try:
+    """Read CSV, TSV or ZIP datasets and yield dictionary rows."""
+
+    with ExitStack() as stack:
+
+        if zipfile.is_zipfile(path):
+            archive = stack.enter_context(zipfile.ZipFile(path))
+
+            names = [
+                name
+                for name in archive.namelist()
+                if name.lower().endswith((".csv", ".txt", ".tsv"))
+                and not name.endswith("/")
+            ]
+
+            if not names:
+                raise RuntimeError(
+                    "ZIP archive contains no CSV, TXT or TSV file"
+                )
+
+            raw = stack.enter_context(archive.open(names[0]))
+
+        else:
+            raw = stack.enter_context(open(path, "rb"))
+
+        text = stack.enter_context(
+            io.TextIOWrapper(
+                raw,
+                encoding="utf-8-sig",
+                errors="replace",
+                newline="",
+            )
+        )
+
         first = text.readline()
+
         if not first:
-            return
-        tab = "\t" in first
-        kw = {"delimiter": "\t", "quoting": cscollectv.QUOTE_NONE} if tab else {"delimiter": ","}
-        header = [h.strip().strip('"') for h in next(csv.reader([first], **kw))]
-        for fields in csv.reader(text, **kw):
+            raise RuntimeError("Dataset file is empty")
+
+        tab_separated = "\t" in first
+
+        options = (
+            {
+                "delimiter": "\t",
+                "quoting": csv.QUOTE_NONE,
+            }
+            if tab_separated
+            else {"delimiter": ","}
+        )
+
+        header = [
+            value.strip().strip('"')
+            for value in next(csv.reader([first], **options))
+        ]
+
+        if not header:
+            raise RuntimeError("Dataset has no column headers")
+
+        for fields in csv.reader(text, **options):
             if fields:
                 yield dict(zip(header, fields))
-    finally:
-        text.close()
 
 
-# ---------- turning rows into records ----------
+# ---------- Turning rows into records ----------
 
-def _clean(s):
-    return (s or "").strip().strip('"').strip()
+def _clean(value):
+    return (value or "").strip().strip('"').strip()
 
 
-def _iso_date(s):
-    s = _clean(s)
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y"):
+def _iso_date(value):
+    value = _clean(value)
+
+    for fmt in (
+        "%d/%m/%Y",
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%y",
+    ):
         try:
-            return datetime.datetime.strptime(s, fmt).date().isoformat()
+            return datetime.datetime.strptime(
+                value, fmt
+            ).date().isoformat()
+
         except ValueError:
-            pass
+            continue
+
     return ""
 
 
 def collect(rows, extra=None):
-    """Return (records_by_acn, status_counts).
+    """Return company records indexed by ACN and dataset status counts.
 
-    Keeps companies with a wanted status (EXAD, SOFF) plus any ACN in `extra`,
-    whatever its status, so appointments can be matched to the company's current status.
+    Includes EXAD and SOFF companies, plus explicitly supplied ACNs
+    regardless of their current status.
     """
-    extra = extra or set()
-    found, counts = {}, Counter()
+
+    extra = {
+        digits.zfill(9)
+        for value in (extra or ())
+        if (digits := re.sub(r"\D", "", str(value)))
+    }
+
+    found = {}
+    counts = Counter()
+
     for row in rows:
+
         code = _clean(row.get("Status")).upper()
         counts[code] += 1
-       if code not in WANTED and acn not in extra:
-    continue
-        if _clean(row.get("Current Name Indicator")).upper() == "N":
-            continue  # a former name of a company already listed under its current name
-        acn = re.sub(r"\D", "", row.get("ACN") or "")
+
+        if _clean(
+            row.get("Current Name Indicator")
+        ).upper() == "N":
+            continue
+
+        acn = re.sub(
+            r"\D",
+            "",
+            row.get("ACN") or "",
+        )
+
         if not acn:
             continue
+
         acn = acn.zfill(9)
+
         if code not in WANTED and acn not in extra:
             continue
+
         if acn in found:
             continue
-        abn = re.sub(r"\D", "", row.get("ABN") or "")
+
+        abn = re.sub(
+            r"\D",
+            "",
+            row.get("ABN") or "",
+        )
+
         found[acn] = {
             "n": _clean(row.get("Company Name")),
             "a": acn,
@@ -149,29 +284,53 @@ def collect(rows, extra=None):
             "s": code,
             "t": _clean(row.get("Type")),
             "c": _clean(row.get("Class")),
-            "r": _iso_date(row.get("Date of Registration")),
+            "r": _iso_date(
+                row.get("Date of Registration")
+            ),
         }
+
     return found, counts
 
 
+# ---------- Preserving previous records ----------
+
 def load_previous(path):
-    """First-seen dates and baseline date from the last real run, so 'New' badges survive."""
+    """Preserve first-seen dates and the original baseline date."""
+
     try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-    except Exception:
+        with open(path, encoding="utf-8") as file:
+            data = json.load(file)
+
+    except (OSError, ValueError, TypeError):
         return {}, None
-    meta = d.get("meta") or {}
+
+    meta = data.get("meta") or {}
+
     if meta.get("sample") or meta.get("kind") != KIND:
         return {}, None
-    return {r["a"]: r.get("f") for r in d.get("leads", []) if r.get("a")}, meta.get("baseline")
 
+    previous = {
+        record["a"]: record.get("f")
+        for record in data.get("leads", [])
+        if record.get("a")
+    }
+
+    return previous, meta.get("baseline")
+
+
+# ---------- Building the output ----------
 
 def build(found, counts, previous, baseline, today, source_url=""):
+    """Build the final company dataset and metadata."""
+
+    previous = previous or {}
+    counts = counts or {}
+
     leads = []
 
-    for acn, rec in found.items():
-        item = dict(rec)
+    for acn, record in found.items():
+
+        item = dict(record)
 
         item["a"] = item.get("a") or acn
         item["n"] = item.get("n") or "Unknown company"
@@ -179,11 +338,15 @@ def build(found, counts, previous, baseline, today, source_url=""):
 
         leads.append(item)
 
+    # Newest first, then alphabetical by company name.
     leads.sort(
         key=lambda item: (
-            item.get("f") or "",
-            (item.get("n") or "").casefold(),
-        ),
+            item.get("n") or ""
+        ).casefold()
+    )
+
+    leads.sort(
+        key=lambda item: item.get("f") or "",
         reverse=True,
     )
 
@@ -197,7 +360,10 @@ def build(found, counts, previous, baseline, today, source_url=""):
         "baseline": baseline or today,
         "count": len(leads),
         "by_status": dict(
-            Counter(item.get("s", "") for item in leads)
+            Counter(
+                item.get("s", "")
+                for item in leads
+            )
         ),
         "all_status_counts": dict(counts),
         "dataset_file": source_url,
@@ -209,33 +375,107 @@ def build(found, counts, previous, baseline, today, source_url=""):
     }
 
 
+# ---------- Main execution ----------
+
 def run(out="leads.json", url=None, path=None):
+    """Download, process and save the latest ASIC company dataset."""
+
     today = datetime.date.today().isoformat()
+
     previous, baseline = load_previous(out)
-    with tempfile.TemporaryDirectory() as td:
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+
         if path is None:
-            url = url or os.environ.get("RADAR_COMPANY_URL") or pick_resource(fetch_listing())
-            print("dataset file:", url)
-            path = os.path.join(td, "company.dat")
+
+            url = (
+                url
+                or os.environ.get("RADAR_COMPANY_URL")
+                or pick_resource(fetch_listing())
+            )
+
+            print("Dataset file:", url)
+
+            path = os.path.join(
+                temp_dir,
+                "company.dat",
+            )
+
             download(url, path)
-            print("downloaded", os.path.getsize(path) // (1 << 20), "MiB")
+
+            print(
+                "Downloaded",
+                os.path.getsize(path) // (1 << 20),
+                "MiB",
+            )
+
         found, counts = collect(iter_rows(path))
-    print("status counts in file:", dict(counts.most_common(12)))
+
+    print(
+        "Status counts in file:",
+        dict(counts.most_common(12)),
+    )
+
     if not found:
-        raise RuntimeError("no companies with status EXAD or SOFF were found; "
-                           "the file format may have changed. Status counts: " + str(dict(counts)))
-    data = build(found, counts, previous, baseline, today, url or "")
-    tmp = out + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-    os.replace(tmp, out)
-    print("by status:", data["meta"]["by_status"])
+        raise RuntimeError(
+            "No companies with status EXAD or SOFF were found. "
+            "The file format may have changed. "
+            f"Status counts: {dict(counts)}"
+        )
+
+    data = build(
+        found,
+        counts,
+        previous,
+        baseline,
+        today,
+        url or "",
+    )
+
+    output_path = os.path.abspath(out)
+    output_dir = os.path.dirname(output_path)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    temp_path = output_path + ".tmp"
+
+    try:
+        with open(
+            temp_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+
+            json.dump(
+                data,
+                file,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+
+        os.replace(temp_path, output_path)
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    print(
+        "Companies by status:",
+        data["meta"]["by_status"],
+    )
+
     return len(data["leads"])
 
 
 if __name__ == "__main__":
+
     try:
-        print(f"wrote {run()} companies")
-    except Exception as e:
-        print("ERROR:", e, file=sys.stderr)
+        print(f"Wrote {run()} companies")
+
+    except Exception as error:
+        print(
+            "ERROR:",
+            error,
+            file=sys.stderr,
+        )
         sys.exit(1)
