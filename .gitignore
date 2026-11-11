@@ -1,8 +1,33 @@
+# Python
 __pycache__/
 *.py[cod]
 .venv/
+venv/
+.pytest_cache/
+
+# Environment and secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# SQLite databases
+*.db
+*.sqlite
 *.sqlite3
 *.db-wal
 *.db-shm
-.pytest_cache/
+
+# Local test files
+auth_api_test.sqlite3
+test_customer_db.sqlite3
+
+neon_url.txt
+db.py.before_hstore_fix
+postgres_patch_review/
+pre_neon_backup/
+insolvency_radar_postgres_patch.zip
+insolvency_radar_source.zip
