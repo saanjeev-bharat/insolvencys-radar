@@ -265,8 +265,11 @@ def upsert(con, lead: dict) -> None:
     for column in COLUMNS:
         if column == "id":
             continue
-        if column == "confidence" and lead.get("confidence") is None:
-            updates.append("confidence=leads.confidence")
+        elif column == "confidence":
+            if lead.get("confidence") is None:
+                updates.append("confidence=leads.confidence")
+            else:
+                updates.append("confidence=excluded.confidence")
         elif column in ("kind", "source"):
             updates.append(f"{column}=excluded.{column}")
         else:
