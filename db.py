@@ -305,7 +305,7 @@ def search(con, kind=None, state=None, status=None, q=None, limit=200):
         limit = int(limit)
     except (TypeError, ValueError):
         limit = 200
-    limit = max(1, min(limit, 5000))
+    limit = max(1, min(limit, 20000))
     sql += " ORDER BY notice_date DESC, first_seen DESC, LOWER(entity_name) ASC LIMIT ?"
     args.append(limit)
     return [dict(row) for row in con.execute(sql, args)]

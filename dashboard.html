@@ -98,7 +98,7 @@ document.addEventListener("click",function(e){var b=e.target.closest("button.cop
   try{navigator.clipboard.writeText(b.getAttribute("data-v")).then(function(){b.textContent="Copied"},function(){b.textContent="Select text"})}catch(x){b.textContent="Select text"}
   setTimeout(function(){b.textContent="Copy"},1500)});
 function load(){
-  fetch("/api/leads?limit=1000").then(function(r){return r.json()}).then(function(rows){
+  fetch("/api/leads?limit=20000").then(function(r){return r.json()}).then(function(rows){
     DATA=rows.map(function(r){return{kind:r.kind,status:r.status||r.kind,name:r.entity_name||r.asset_summary||"Unnamed",acn:r.acn,abn:r.abn,state:r.state||"",postcode:r.postcode||"",notice:r.notice_date,deadline:r.deadline,asset:r.asset_summary,person:r.contact_name||"See notice",firm:r.contact_firm||"",phone:r.contact_phone,email:r.contact_email,conf:r.confidence||0,url:r.source_url}});
     render();
   }).catch(function(){document.getElementById("count").textContent="Could not load data."});

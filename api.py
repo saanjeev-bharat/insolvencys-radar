@@ -353,7 +353,7 @@ def leads(
     state: str | None = None,
     status: str | None = None,
     q: str | None = None,
-    limit: int = Query(200, ge=1, le=1000)
+    limit: int = Query(200, ge=1, le=20000)
 ):
     with db.connect() as con:
         return db.search(
