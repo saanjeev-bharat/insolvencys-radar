@@ -31,3 +31,7 @@ postgres_patch_review/
 pre_neon_backup/
 insolvency_radar_postgres_patch.zip
 insolvency_radar_source.zip
+# Local backups and temporary comparison files
+.venv_broken/
+*.before_stripe_billing
+_radar_old_temp.db

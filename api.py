@@ -6,10 +6,11 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Query, HTTPException, Depends
+from fastapi import FastAPI, Query, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 import jwt
+import stripe
 import auth
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -34,7 +35,8 @@ class LoginRequest(BaseModel):
 class WatchlistRequest(BaseModel):
     acn: str = Field(pattern=r"^\d{9}$")
     company_name: str | None = Field(default=None, max_length=250)
-
+class CheckoutRequest(BaseModel):
+    plan: str = Field(pattern=r"^(starter|professional|business)$")
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security)
@@ -166,6 +168,320 @@ def current_customer(user: dict = Depends(get_current_user)):
             "plan": user["plan"]
         }
     }
+
+@app.post("/api/billing/checkout")
+def create_checkout_session(
+    data: CheckoutRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Create a Stripe-hosted subscription checkout session."""
+
+    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+    if not stripe.api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Billing is not configured."
+        )
+
+    frontend_url = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
+    if not frontend_url.startswith("https://"):
+        raise HTTPException(
+            status_code=503,
+            detail="Billing frontend URL is not configured correctly."
+        )
+
+    price_variables = {
+        "starter": "STRIPE_PRICE_STARTER",
+        "professional": "STRIPE_PRICE_PROFESSIONAL",
+        "business": "STRIPE_PRICE_BUSINESS",
+    }
+    price_id = os.environ.get(price_variables[data.plan], "").strip()
+
+    if not price_id:
+        raise HTTPException(
+            status_code=503,
+            detail="The selected subscription plan is not configured."
+        )
+
+    try:
+        with db.connect() as con:
+            existing = con.execute(
+                """
+                SELECT stripe_customer_id
+                FROM subscriptions
+                WHERE user_id = ?
+                  AND stripe_customer_id IS NOT NULL
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (user["id"],)
+            ).fetchone()
+
+        customer_id = (
+            existing["stripe_customer_id"]
+            if existing else None
+        )
+
+        checkout_customer = (
+            {"customer": customer_id}
+            if customer_id
+            else {"customer_email": user["email"]}
+        )
+
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            **checkout_customer,
+            client_reference_id=str(user["id"]),
+            metadata={
+                "user_id": str(user["id"]),
+                "plan": data.plan,
+            },
+            subscription_data={
+                "metadata": {
+                    "user_id": str(user["id"]),
+                    "plan": data.plan,
+                }
+            },
+            success_url=(
+                f"{frontend_url}/?billing=success"
+                "&session_id={CHECKOUT_SESSION_ID}"
+            ),
+            cancel_url=f"{frontend_url}/?billing=cancelled",
+        )
+
+        return {"checkout_url": session.url}
+
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to create a secure checkout session. Please try again."
+        )
+
+def _stripe_timestamp(value):
+    if value is None:
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(value))
+
+
+@app.post("/api/billing/webhook")
+async def stripe_webhook(request: Request):
+    """Verify Stripe events and synchronise subscription access."""
+
+    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+
+    if not stripe.api_key or not webhook_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Stripe webhook is not configured."
+        )
+
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, signature, webhook_secret
+        )
+    except (ValueError, stripe.error.SignatureVerificationError):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Stripe webhook signature."
+        )
+
+    event_data = event.to_dict_recursive()
+    event_type = event_data.get("type")
+    event_object = event_data.get("data", {}).get("object", {})
+
+    subscription_id = None
+    checkout_user_id = None
+    checkout_customer_id = None
+
+    if event_type == "checkout.session.completed":
+        subscription_id = event_object.get("subscription")
+        checkout_customer_id = event_object.get("customer")
+        checkout_user_id = (
+            event_object.get("client_reference_id")
+            or event_object.get("metadata", {}).get("user_id")
+        )
+
+    elif event_type in (
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    ):
+        subscription_id = event_object.get("id")
+
+    elif event_type == "invoice.payment_failed":
+        subscription_id = event_object.get("subscription")
+
+        if not subscription_id:
+            parent = event_object.get("parent") or {}
+            details = parent.get("subscription_details") or {}
+            subscription_id = details.get("subscription")
+
+    else:
+        return {"received": True, "ignored": True}
+
+    if isinstance(subscription_id, dict):
+        subscription_id = subscription_id.get("id")
+
+    if not subscription_id:
+        return {"received": True, "ignored": True}
+
+    try:
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        sub = subscription.to_dict_recursive()
+
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve Stripe subscription."
+        )
+
+    metadata = sub.get("metadata") or {}
+    user_id = metadata.get("user_id") or checkout_user_id
+
+    if not user_id:
+        return {"received": True, "ignored": True}
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return {"received": True, "ignored": True}
+
+    items = (sub.get("items") or {}).get("data") or []
+    if not items:
+        return {"received": True, "ignored": True}
+
+    price_id = (items[0].get("price") or {}).get("id")
+
+    configured_prices = {
+        "starter": os.environ.get("STRIPE_PRICE_STARTER", "").strip(),
+        "professional": os.environ.get("STRIPE_PRICE_PROFESSIONAL", "").strip(),
+        "business": os.environ.get("STRIPE_PRICE_BUSINESS", "").strip(),
+    }
+
+    plan = next(
+        (name for name, configured_id in configured_prices.items()
+         if configured_id and configured_id == price_id),
+        None
+    )
+
+    if not plan:
+        return {"received": True, "ignored": True}
+
+    status = sub.get("status", "unknown")
+    customer_id = sub.get("customer")
+
+    if isinstance(customer_id, dict):
+        customer_id = customer_id.get("id")
+    if isinstance(checkout_customer_id, dict):
+        checkout_customer_id = checkout_customer_id.get("id")
+
+    if checkout_customer_id and checkout_customer_id != customer_id:
+        return {"received": True, "ignored": True}
+
+    period_start = sub.get("current_period_start")
+    period_end = sub.get("current_period_end")
+
+    if period_start is None:
+        period_start = items[0].get("current_period_start")
+    if period_end is None:
+        period_end = items[0].get("current_period_end")
+
+    active = status in ("active", "trialing")
+
+    with db.connect() as con:
+        user = con.execute(
+            "SELECT id FROM users WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+
+        if not user:
+            return {"received": True, "ignored": True}
+
+        existing = con.execute(
+            """
+            SELECT id, user_id
+            FROM subscriptions
+            WHERE stripe_subscription_id = ?
+            LIMIT 1
+            """,
+            (subscription_id,)
+        ).fetchone()
+
+        if existing and int(existing["user_id"]) != user_id:
+            return {"received": True, "ignored": True}
+
+        values = (
+            customer_id,
+            subscription_id,
+            price_id,
+            plan,
+            status,
+            _stripe_timestamp(period_start),
+            _stripe_timestamp(period_end),
+            int(bool(sub.get("cancel_at_period_end"))),
+        )
+
+        if existing:
+            con.execute(
+                """
+                UPDATE subscriptions
+                SET stripe_customer_id = ?,
+                    stripe_price_id = ?,
+                    plan = ?,
+                    status = ?,
+                    current_period_start = ?,
+                    current_period_end = ?,
+                    cancel_at_period_end = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE stripe_subscription_id = ?
+                """,
+                (
+                    customer_id, price_id, plan, status,
+                    _stripe_timestamp(period_start),
+                    _stripe_timestamp(period_end),
+                    int(bool(sub.get("cancel_at_period_end"))),
+                    subscription_id,
+                )
+            )
+        else:
+            con.execute(
+                """
+                INSERT INTO subscriptions (
+                    user_id, stripe_customer_id,
+                    stripe_subscription_id, stripe_price_id,
+                    plan, status, current_period_start,
+                    current_period_end, cancel_at_period_end
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id,) + values
+            )
+
+        current = con.execute(
+            """
+            SELECT plan
+            FROM subscriptions
+            WHERE user_id = ?
+              AND status IN ('active', 'trialing')
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,)
+        ).fetchone()
+
+        effective_plan = current["plan"] if current else "free"
+
+        con.execute(
+            "UPDATE users SET plan = ? WHERE id = ?",
+            (effective_plan, user_id)
+        )
+
+    return {"received": True}
 # Customer company watchlist
 
 PLAN_LIMITS = {
