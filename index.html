@@ -1,4 +1,4 @@
-<title>Insolvency Radar</title>
+<title>Insolvencys Radar</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0c5c7a">
@@ -80,7 +80,7 @@ footer a{color:var(--accent)}
 
 <div class="wrap">
 <header>
-  <h1>Insolvency Radar</h1>
+  <h1>Insolvencys Radar</h1>
   <p>Australian companies in liquidation, administration, receivership or strike-off, from ASIC's open data. Each card names the appointed practitioner where ASIC lists one.</p>
   <ul class="stats" id="stats"></ul>
   <div class="accountbar"><span class="account-status" id="accountStatus">Free public search</span><button id="watchlistBtn" type="button">My watchlist</button><button id="accountBtn" class="primary" type="button">Login / Register</button></div>
@@ -121,11 +121,32 @@ footer a{color:var(--accent)}
     <input id="accountEmail" type="email" required autocomplete="email">
 
     <label for="accountPassword">Password</label>
-    <input id="accountPassword" type="password" required minlength="8" autocomplete="current-password">
+    <input id="accountPassword" type="password" required minlength="10" maxlength="128" autocomplete="current-password">
 
     <div class="modal-actions">
       <button id="submitAccount" class="primary" type="submit">Login</button>
       <button id="switchAccount" type="button">Create account</button>
+      <button id="forgotPassword" type="button">Forgot password?</button>
+    </div>
+  </form>
+
+  <form id="resetRequestForm" hidden>
+    <label for="resetEmail">Email address</label>
+    <input id="resetEmail" type="email" required autocomplete="email">
+    <div class="modal-actions">
+      <button class="primary" type="submit">Send reset link</button>
+      <button id="backToLoginFromRequest" type="button">Back to login</button>
+    </div>
+  </form>
+
+  <form id="resetConfirmForm" hidden>
+    <label for="resetNewPassword">New password</label>
+    <input id="resetNewPassword" type="password" required minlength="10" maxlength="128" autocomplete="new-password">
+    <label for="resetConfirmPassword">Confirm new password</label>
+    <input id="resetConfirmPassword" type="password" required minlength="10" maxlength="128" autocomplete="new-password">
+    <div class="modal-actions">
+      <button class="primary" type="submit">Reset password</button>
+      <button id="backToLoginFromConfirm" type="button">Back to login</button>
     </div>
   </form>
 
@@ -278,18 +299,77 @@ function accountUI(){
   $("watchlistBtn").textContent=accountUser?"My watchlist":"Watchlist login";
 }
 function showAccount(mode){
-  accountMode=mode||"login"; $("accountTitle").textContent=accountMode==="register"?"Create your account":"Sign in to Insolvencys Radar";
+  accountMode=mode||"login";
+  $("accountTitle").textContent=accountMode==="register"?"Create your account":"Sign in to Insolvencys Radar";
   $("accountMessage").textContent=accountMode==="register"?"Create an account to save up to five companies on the free plan.":"Sign in to access your private company watchlist.";
   $("submitAccount").textContent=accountMode==="register"?"Create account":"Login";
   $("switchAccount").textContent=accountMode==="register"?"I already have an account":"Create account";
-  $("accountForm").hidden=false; $("watchlistPanel").hidden=true; $("plansPanel").hidden=false;
-  if(!$('accountDialog').open)$('accountDialog').showModal();
+  $("forgotPassword").hidden=accountMode!=="login";
+  $("accountForm").hidden=false;
+  $("resetRequestForm").hidden=true;
+  $("resetConfirmForm").hidden=true;
+  $("watchlistPanel").hidden=true;
+  $("plansPanel").hidden=false;
+  if(!$("accountDialog").open)$("accountDialog").showModal();
+}
+function showPasswordResetRequest(){
+  $("accountTitle").textContent="Reset your password";
+  message("Enter your account email address and we’ll send a password-reset link if the account exists.");
+  $("accountForm").hidden=true;
+  $("resetRequestForm").hidden=false;
+  $("resetConfirmForm").hidden=true;
+  $("watchlistPanel").hidden=true;
+  $("plansPanel").hidden=true;
+  $("resetEmail").value=$("accountEmail").value.trim();
+  if(!$("accountDialog").open)$("accountDialog").showModal();
+}
+function showPasswordResetConfirm(){
+  $("accountTitle").textContent="Choose a new password";
+  message("Enter and confirm your new password. Use at least 10 characters.");
+  $("accountForm").hidden=true;
+  $("resetRequestForm").hidden=true;
+  $("resetConfirmForm").hidden=false;
+  $("watchlistPanel").hidden=true;
+  $("plansPanel").hidden=true;
+  if(!$("accountDialog").open)$("accountDialog").showModal();
 }
 function message(text){$("accountMessage").textContent=text;}
 $("accountBtn").addEventListener("click",function(){if(accountUser){showWatchlist()}else showAccount("login")});
 $("watchlistBtn").addEventListener("click",function(){if(accountUser)showWatchlist();else showAccount("login")});
 $("closeAccount").addEventListener("click",function(){$("accountDialog").close()});
 $("switchAccount").addEventListener("click",function(){showAccount(accountMode==="register"?"login":"register")});
+$("forgotPassword").addEventListener("click",showPasswordResetRequest);
+$("backToLoginFromRequest").addEventListener("click",function(){showAccount("login")});
+$("backToLoginFromConfirm").addEventListener("click",function(){showAccount("login")});
+
+$("resetRequestForm").addEventListener("submit",function(e){
+  e.preventDefault();
+  if(!apiReady()){message("The account service is not available. Please try again later.");return;}
+  var email=$("resetEmail").value.trim();
+  api("/api/auth/password-reset/request",{method:"POST",body:JSON.stringify({email:email})})
+    .then(function(){message("If an account exists for that email, a password-reset link has been sent. Check your inbox and spam folder.");})
+    .catch(function(err){message(err.message||"Could not request a password reset. Please try again.");});
+});
+
+$("resetConfirmForm").addEventListener("submit",function(e){
+  e.preventDefault();
+  var token=new URLSearchParams(window.location.search).get("reset_token")||"";
+  var password=$("resetNewPassword").value;
+  var confirmation=$("resetConfirmPassword").value;
+  if(!token){message("This reset link is missing its token. Request a new password-reset email.");return;}
+  if(password.length<10||password.length>128){message("Your new password must be between 10 and 128 characters.");return;}
+  if(password!==confirmation){message("The two passwords do not match.");return;}
+  api("/api/auth/password-reset/confirm",{method:"POST",body:JSON.stringify({token:token,new_password:password})})
+    .then(function(){
+      $("resetConfirmForm").reset();
+      window.history.replaceState({},document.title,window.location.pathname);
+      message("Your password has been reset. You can now sign in with your new password.");
+      showAccount("login");
+      message("Your password has been reset. Please sign in with your new password.");
+    })
+    .catch(function(err){message(err.message||"The reset link may have expired. Request a new one.");});
+});
+
 $("accountForm").addEventListener("submit",function(e){
   e.preventDefault(); if(!apiReady()){message("Backend not connected yet. Deploy the Render service and set RADAR_API_BASE in this page first.");return;}
   var endpoint=accountMode==="register"?"/api/auth/register":"/api/auth/login";
@@ -329,4 +409,9 @@ document.addEventListener("click",function(e){
 });
 if(apiReady()&&accountToken){api("/api/auth/me").then(function(j){accountUser=j.user;accountUI()}).catch(function(){sessionStorage.removeItem("radar_token");accountToken="";accountUI()})}
 accountUI();
+
+// A password-reset email returns to this page with ?reset_token=...
+if(new URLSearchParams(window.location.search).has("reset_token")){
+  showPasswordResetConfirm();
+}
 </script>
