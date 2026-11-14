@@ -108,6 +108,61 @@ footer a{color:var(--accent)}
   <p>This site is independent and not endorsed by ASIC. It is not legal or financial advice.</p>
 </footer>
 </div>
+<dialog class="modal" id="accountDialog" aria-labelledby="accountTitle">
+  <div class="modal-actions">
+    <button id="closeAccount" type="button" aria-label="Close">Close</button>
+  </div>
+
+  <h2 id="accountTitle">Sign in to Insolvencys Radar</h2>
+  <p id="accountMessage">Sign in to access your private company watchlist.</p>
+
+  <form id="accountForm">
+    <label for="accountEmail">Email address</label>
+    <input id="accountEmail" type="email" required autocomplete="email">
+
+    <label for="accountPassword">Password</label>
+    <input id="accountPassword" type="password" required minlength="8" autocomplete="current-password">
+
+    <div class="modal-actions">
+      <button id="submitAccount" class="primary" type="submit">Login</button>
+      <button id="switchAccount" type="button">Create account</button>
+    </div>
+  </form>
+
+  <div id="watchlistPanel" hidden></div>
+
+  <div id="plansPanel" hidden>
+    <h3>Choose your subscription</h3>
+    <p>All prices are in Australian dollars (AUD).</p>
+
+    <div class="plan">
+      <h4>Free</h4>
+      <p>A$0 / month</p>
+      <p>Monitor up to 5 companies</p>
+    </div>
+
+    <div class="plan">
+      <h4>Starter</h4>
+      <p>A$19 / month</p>
+      <p>Monitor up to 50 companies</p>
+      <button type="button" data-plan="starter">Choose Starter</button>
+    </div>
+
+    <div class="plan">
+      <h4>Professional</h4>
+      <p>A$49 / month</p>
+      <p>Monitor up to 250 companies</p>
+      <button type="button" data-plan="professional">Choose Professional</button>
+    </div>
+
+    <div class="plan">
+      <h4>Business</h4>
+      <p>A$99 / month</p>
+      <p>Monitor up to 1,000 companies</p>
+      <button type="button" data-plan="business">Choose Business</button>
+    </div>
+  </div>
+</dialog>
 
 <script>
 var PAGE=60, shown=PAGE, DATA=[], META={};
@@ -208,7 +263,7 @@ if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch
 load();
 
 // Customer account integration. Set this to the deployed Render service URL after deployment.
-var API_BASE = window.RADAR_API_BASE || "https://YOUR-RENDER-SERVICE.onrender.com";
+var API_BASE = window.RADAR_API_BASE || "https://insolvencys-radar.onrender.com";
 var accountToken = sessionStorage.getItem("radar_token") || "";
 var accountUser = null, accountMode = "login";
 function apiReady(){return API_BASE.indexOf("YOUR-RENDER-SERVICE")===-1}
@@ -223,7 +278,7 @@ function accountUI(){
   $("watchlistBtn").textContent=accountUser?"My watchlist":"Watchlist login";
 }
 function showAccount(mode){
-  accountMode=mode||"login"; $("accountTitle").textContent=accountMode==="register"?"Create your account":"Sign in to Insolvency Radar";
+  accountMode=mode||"login"; $("accountTitle").textContent=accountMode==="register"?"Create your account":"Sign in to Insolvencys Radar";
   $("accountMessage").textContent=accountMode==="register"?"Create an account to save up to five companies on the free plan.":"Sign in to access your private company watchlist.";
   $("submitAccount").textContent=accountMode==="register"?"Create account":"Login";
   $("switchAccount").textContent=accountMode==="register"?"I already have an account":"Create account";
@@ -261,7 +316,16 @@ document.addEventListener("click",function(e){
   var remove=e.target.closest("button[data-remove-acn]");
   if(remove){api("/api/watchlist/"+remove.dataset.removeAcn,{method:"DELETE"}).then(showWatchlist).catch(function(err){message(err.message)});return;}
   var plan=e.target.closest("button[data-plan]");
-  if(plan){api("/api/billing/checkout",{method:"POST",body:JSON.stringify({plan:plan.dataset.plan})}).then(function(j){location.href=j.checkout_url}).catch(function(err){message(err.message)});}
+  if(plan){
+  if(!accountUser){
+    showAccount("login");
+    message("Please sign in or create an account before choosing a subscription.");
+    return;
+  }
+  api("/api/billing/checkout",{method:"POST",body:JSON.stringify({plan:plan.dataset.plan})})
+    .then(function(j){location.href=j.checkout_url})
+    .catch(function(err){message(err.message)});
+  }
 });
 if(apiReady()&&accountToken){api("/api/auth/me").then(function(j){accountUser=j.user;accountUI()}).catch(function(){sessionStorage.removeItem("radar_token");accountToken="";accountUI()})}
 accountUI();
