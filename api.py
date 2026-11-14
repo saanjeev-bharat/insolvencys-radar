@@ -2,6 +2,9 @@
 import csv
 import io
 import os
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 import threading
 import time
 from pathlib import Path
@@ -12,6 +15,7 @@ from pydantic import BaseModel, EmailStr, Field
 import jwt
 import stripe
 import auth
+import email_service
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
@@ -32,6 +36,11 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    new_password: str = Field(min_length=10, max_length=128)
 class WatchlistRequest(BaseModel):
     acn: str = Field(pattern=r"^\d{9}$")
     company_name: str | None = Field(default=None, max_length=250)
@@ -155,7 +164,130 @@ def login_customer(data: LoginRequest):
             "plan": user["plan"]
         }
     }
+@app.post("/api/auth/password-reset/request")
+def request_password_reset(data: PasswordResetRequest):
+    """Request a password reset without revealing whether an account exists."""
 
+    email = str(data.email).strip().lower()
+
+    with db.connect() as con:
+        user = con.execute(
+            """
+            SELECT id, email
+            FROM users
+            WHERE LOWER(email)=LOWER(?) AND is_active=1
+            """,
+            (email,)
+        ).fetchone()
+
+    if user is not None:
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc)
+        expires = (now + timedelta(minutes=30)).isoformat()
+
+        with db.connect() as con:
+            con.execute(
+                """
+                UPDATE password_reset_tokens
+                SET used_at=?
+                WHERE user_id=? AND used_at IS NULL
+                """,
+                (now.isoformat(), user["id"])
+            )
+            con.execute(
+                """
+                INSERT INTO password_reset_tokens
+                (user_id, token_hash, expires_at)
+                VALUES (?, ?, ?)
+                """,
+                (user["id"], token_hash, expires)
+            )
+
+        try:
+            email_service.send_password_reset_email(user["email"], token)
+        except Exception as exc:
+            with db.connect() as con:
+                con.execute(
+                    """
+                    UPDATE password_reset_tokens
+                    SET used_at=?
+                    WHERE token_hash=? AND used_at IS NULL
+                    """,
+                    (datetime.now(timezone.utc).isoformat(), token_hash)
+                )
+            print("Password reset email delivery failed:", str(exc))
+
+    return {
+        "message": "If an active account exists, password reset instructions will be sent."
+    }
+
+
+@app.post("/api/auth/password-reset/confirm")
+def confirm_password_reset(data: PasswordResetConfirmRequest):
+    """Set a new password using a valid, unused reset token."""
+
+    token_hash = hashlib.sha256(
+        data.token.encode("utf-8")
+    ).hexdigest()
+
+    now = datetime.now(timezone.utc)
+
+    with db.connect() as con:
+        record = con.execute(
+            """
+            SELECT t.id, t.user_id, t.expires_at, t.used_at
+            FROM password_reset_tokens t
+            JOIN users u ON u.id=t.user_id
+            WHERE t.token_hash=? AND u.is_active=1
+            """,
+            (token_hash,)
+        ).fetchone()
+
+        if record is None or record["used_at"] is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired password reset link."
+            )
+
+        try:
+            expiry = datetime.fromisoformat(record["expires_at"])
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired password reset link."
+            )
+
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+
+        if expiry <= now:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired password reset link."
+            )
+
+        password_hash = auth.hash_password(data.new_password)
+
+        con.execute(
+            """
+            UPDATE users
+            SET password_hash=?, updated_at=?
+            WHERE id=?
+            """,
+            (password_hash, now.isoformat(), record["user_id"])
+        )
+
+        con.execute(
+            """
+            UPDATE password_reset_tokens
+            SET used_at=?
+            WHERE user_id=? AND used_at IS NULL
+            """,
+            (now.isoformat(), record["user_id"])
+        )
+
+    return {"message": "Your password has been reset successfully. Please log in."}
 
 @app.get("/api/auth/me")
 def current_customer(user: dict = Depends(get_current_user)):
@@ -290,7 +422,7 @@ async def stripe_webhook(request: Request):
             detail="Invalid Stripe webhook signature."
         )
 
-    event_data = event.to_dict_recursive()
+    event_data = event._to_dict_recursive()
     event_type = event_data.get("type")
     event_object = event_data.get("data", {}).get("object", {})
 
@@ -332,7 +464,7 @@ async def stripe_webhook(request: Request):
 
     try:
         subscription = stripe.Subscription.retrieve(subscription_id)
-        sub = subscription.to_dict_recursive()
+        sub = subscription._to_dict_recursive()
 
     except stripe.error.StripeError:
         raise HTTPException(
