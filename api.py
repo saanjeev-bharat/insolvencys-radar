@@ -384,7 +384,7 @@ def create_checkout_session(
 
         return {"checkout_url": session.url}
 
-        except stripe.error.StripeError as exc:
+    except stripe.error.StripeError as exc:
         print(
             "STRIPE CHECKOUT ERROR:",
             type(exc).__name__,
