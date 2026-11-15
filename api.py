@@ -798,11 +798,25 @@ def start_background_refresh():
 
 @app.get("/api/health")
 def health():
-    return {
-        "status": "ok",
-        "application": "Insolvency Radar"
-    }
+    try:
+        with db.connect() as con:
+            con.execute("SELECT 1").fetchone()
+            database = con.dialect_name
 
+        return {
+            "status": "ok",
+            "application": "Insolvencys Radar",
+            "database": "connected",
+            "database_type": database
+        }
+
+    except Exception as exc:
+        print("DATABASE HEALTH CHECK FAILED:", type(exc).__name__)
+        return {
+            "status": "error",
+            "application": "Insolvencys Radar",
+            "database": "disconnected"
+        }
 
 @app.get("/api/leads")
 def leads(
