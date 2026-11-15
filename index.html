@@ -309,7 +309,7 @@ function showAccount(mode){
   $("resetRequestForm").hidden=true;
   $("resetConfirmForm").hidden=true;
   $("watchlistPanel").hidden=true;
-  $("plansPanel").hidden=false;
+  $("plansPanel").hidden=true;
   if(!$("accountDialog").open)$("accountDialog").showModal();
 }
 function showPasswordResetRequest(){
@@ -377,7 +377,7 @@ $("accountForm").addEventListener("submit",function(e){
 });
 function showWatchlist(){
   if(!accountUser){showAccount("login");return;}
-  $("accountTitle").textContent="My company watchlist"; $("accountForm").hidden=true; $("plansPanel").hidden=false; $("watchlistPanel").hidden=false;
+  $("accountTitle").textContent="My company watchlist"; $("accountForm").hidden=true; $("plansPanel").hidden=true; $("watchlistPanel").hidden=false;
   if(!$('accountDialog').open)$('accountDialog').showModal();
   $("watchlistPanel").textContent="Loading your saved companies…";
   api("/api/watchlist").then(function(j){
