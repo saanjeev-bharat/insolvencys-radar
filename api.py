@@ -384,7 +384,16 @@ def create_checkout_session(
 
         return {"checkout_url": session.url}
 
-    except stripe.error.StripeError:
+        except stripe.error.StripeError as exc:
+        print(
+            "STRIPE CHECKOUT ERROR:",
+            type(exc).__name__,
+            "message:", str(exc),
+            "code:", getattr(exc, "code", None),
+            "param:", getattr(exc, "param", None),
+            "request_id:", getattr(exc, "request_id", None),
+            flush=True
+        )
         raise HTTPException(
             status_code=502,
             detail="Unable to create a secure checkout session. Please try again."
