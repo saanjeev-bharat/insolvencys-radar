@@ -206,8 +206,7 @@ def main():
         for start in range(0, len(prepared), batch_size):
             batch = prepared[start:start + batch_size]
 
-            for lead in batch:
-                db.upsert(con, lead)
+            db.upsert_many(con, batch)
 
             imported += len(batch)
             print(

@@ -19,6 +19,7 @@ from sqlalchemy import (
     Column, Float, ForeignKey, Index, Integer, MetaData, String, Table,
     UniqueConstraint, create_engine, event, text, func,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError as SQLAlchemyIntegrityError
 
@@ -334,10 +335,57 @@ def upsert_many(con, batch: list[dict]) -> int:
                     f"Lead is missing required field: {required}"
                 )
 
-        raw_confidence = row["confidence"]
-        rows.append(
-            [row[column] for column in COLUMNS] + [raw_confidence]
-        )
+        rows.append(row)
+    if con.dialect_name == "postgresql":
+        rows_with_confidence = []
+        rows_without_confidence = []
+
+        for row in rows:
+            statement_row = dict(row)
+
+            if statement_row["confidence"] is None:
+                statement_row["confidence"] = 0.5
+                rows_without_confidence.append(statement_row)
+            else:
+                rows_with_confidence.append(statement_row)
+
+        def execute_pg_batch(statement_rows, preserve_confidence):
+            if not statement_rows:
+                return
+
+            stmt = pg_insert(leads).values(statement_rows)
+            excluded = stmt.excluded
+            updates = {}
+
+            for column in COLUMNS:
+                if column == "id":
+                    continue
+                elif column == "confidence":
+                    updates[column] = (
+                        leads.c.confidence
+                        if preserve_confidence
+                        else excluded.confidence
+                    )
+                elif column in ("kind", "source"):
+                    updates[column] = getattr(excluded, column)
+                else:
+                    incoming = getattr(excluded, column)
+                    updates[column] = func.coalesce(
+                        func.nullif(incoming, ""),
+                        getattr(leads.c, column),
+                    )
+
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[leads.c.id],
+                set_=updates,
+            )
+
+            con._connection.execute(stmt)
+
+        execute_pg_batch(rows_without_confidence, True)
+        execute_pg_batch(rows_with_confidence, False)
+
+        return len(rows)
 
     placeholders = [
         "COALESCE(?, 0.5)" if column == "confidence" else "?"
@@ -363,15 +411,18 @@ def upsert_many(con, batch: list[dict]) -> int:
                 f"ELSE leads.{column} END"
             )
 
-    placeholders.append("?")
-
     sql = (
         f"INSERT INTO leads ({','.join(COLUMNS)}) "
         f"VALUES ({','.join(placeholders)}) "
         f"ON CONFLICT(id) DO UPDATE SET {','.join(updates)}"
     )
 
-    con.executemany(sql, rows)
+    sqlite_rows = [
+        [row[column] for column in COLUMNS] + [row["confidence"]]
+        for row in rows
+    ]
+
+    con.executemany(sql, sqlite_rows)
     return len(rows)
 
 
