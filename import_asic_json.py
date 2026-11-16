@@ -200,14 +200,22 @@ def main():
         return
 
     imported = 0
+    batch_size = 500
 
     with db.connect() as con:
-        for lead in prepared:
-            db.upsert(con, lead)
-            imported += 1
+        for start in range(0, len(prepared), batch_size):
+            batch = prepared[start:start + batch_size]
+
+            for lead in batch:
+                db.upsert(con, lead)
+
+            imported += len(batch)
+            print(
+                f"Imported {imported:,} / {len(prepared):,} records",
+                flush=True,
+            )
 
     print(f"\nImport committed successfully: {imported} records.")
-
 
 if __name__ == "__main__":
     main()

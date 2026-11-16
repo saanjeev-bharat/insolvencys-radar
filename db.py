@@ -177,6 +177,36 @@ class CompatConnection:
         return CompatResult(self._connection.execute(text(statement), bound))
 
 
+    def executemany(self, sql, rows):
+        rows = list(rows)
+        if not rows:
+            return None
+
+        index = 0
+
+        def replace(_match):
+            nonlocal index
+            name = f"p{index}"
+            index += 1
+            return f":{name}"
+
+        statement = re.sub(r"\?", replace, sql)
+        bound_rows = []
+
+        for row in rows:
+            values = list(row)
+            if len(values) != index:
+                raise ValueError(
+                    "SQL parameter count does not match placeholders"
+                )
+            bound_rows.append({
+                f"p{i}": value for i, value in enumerate(values)
+            })
+
+        return CompatResult(
+            self._connection.execute(text(statement), bound_rows)
+        )
+
 def _database_url(path=None):
     if path is None:
         configured = os.environ.get("DATABASE_URL")
@@ -283,6 +313,66 @@ def upsert(con, lead: dict) -> None:
         f"ON CONFLICT(id) DO UPDATE SET {','.join(updates)}",
         [row[column] for column in COLUMNS],
     )
+
+
+
+def upsert_many(con, batch: list[dict]) -> int:
+    if not batch:
+        return 0
+
+    rows = []
+
+    for lead in batch:
+        if not isinstance(lead, dict):
+            raise TypeError("Lead must be a dictionary")
+
+        row = {column: lead.get(column) for column in COLUMNS}
+
+        for required in ("id", "kind", "source"):
+            if not row[required] or not str(row[required]).strip():
+                raise ValueError(
+                    f"Lead is missing required field: {required}"
+                )
+
+        raw_confidence = row["confidence"]
+        rows.append(
+            [row[column] for column in COLUMNS] + [raw_confidence]
+        )
+
+    placeholders = [
+        "COALESCE(?, 0.5)" if column == "confidence" else "?"
+        for column in COLUMNS
+    ]
+
+    updates = []
+
+    for column in COLUMNS:
+        if column == "id":
+            continue
+        elif column == "confidence":
+            updates.append(
+                "confidence=CASE WHEN ? IS NULL "
+                "THEN leads.confidence ELSE excluded.confidence END"
+            )
+        elif column in ("kind", "source"):
+            updates.append(f"{column}=excluded.{column}")
+        else:
+            updates.append(
+                f"{column}=CASE WHEN excluded.{column} IS NOT NULL "
+                f"AND excluded.{column} != '' THEN excluded.{column} "
+                f"ELSE leads.{column} END"
+            )
+
+    placeholders.append("?")
+
+    sql = (
+        f"INSERT INTO leads ({','.join(COLUMNS)}) "
+        f"VALUES ({','.join(placeholders)}) "
+        f"ON CONFLICT(id) DO UPDATE SET {','.join(updates)}"
+    )
+
+    con.executemany(sql, rows)
+    return len(rows)
 
 
 def search(con, kind=None, state=None, status=None, q=None, limit=200):
