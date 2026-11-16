@@ -34,8 +34,8 @@ jobs:
 
       - name: Commit updated data
         run: |
-          git config user.name "radar-bot"
-          git config user.email "radar-bot@users.noreply.github.com"
+          git config user.name "saanjeev-bharat"
+          git config user.email "sanjeev.bharat@gmail.com"
           git add -A leads.json
           git diff --cached --quiet || git commit -m "Update data"
           git push
