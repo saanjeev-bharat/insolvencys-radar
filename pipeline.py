@@ -8,7 +8,7 @@ import asic_stats
 
 
 def import_asic_stats(con):
-    appointments, info = asic_stats.load_all(months=12)
+    appointments, info = asic_stats.load_all(months=None)
 
     source = "ASIC Series 1 and 2"
     workbook_source = info.get("file") or asic_stats.PAGE

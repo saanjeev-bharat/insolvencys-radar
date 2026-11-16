@@ -27,6 +27,11 @@ jobs:
       - name: Collect ASIC data
         run: python collect.py
 
+      - name: Import complete ASIC appointment history into Neon
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python import_asic_history.py
+
       - name: Import ASIC records into Neon
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
