@@ -428,9 +428,13 @@ def load_all(months=12, path=None, workdir=None):
     """Download the latest ASIC workbook, falling back to a local copy."""
 
     since = (
-        datetime.date.today()
-        - datetime.timedelta(days=int(months * 30.5))
-    ).isoformat()
+        None
+        if months is None
+        else (
+            datetime.date.today()
+            - datetime.timedelta(days=int(months * 30.5))
+        ).isoformat()
+    )
 
     url = ""
 
@@ -469,16 +473,26 @@ def load_all(months=12, path=None, workdir=None):
         "rows": len(appts)
     })
 
-    print(
-        "ASIC appointments since",
-        since,
-        ":",
-        len(appts),
-        "| sheet:",
-        info["sheet"],
-        "| columns:",
-        info["columns"]
-    )
+    if since is None:
+        print(
+            "ASIC appointments (all available history):",
+            len(appts),
+            "| sheet:",
+            info["sheet"],
+            "| columns:",
+            info["columns"]
+        )
+    else:
+        print(
+            "ASIC appointments since",
+            since,
+            ":",
+            len(appts),
+            "| sheet:",
+            info["sheet"],
+            "| columns:",
+            info["columns"]
+        )
 
     return appts, info
 

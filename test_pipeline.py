@@ -131,3 +131,53 @@ def test_asic_appointment_history_is_complete_and_idempotent(tmp_path, monkeypat
     assert summary["status"] == "liquidation"
     assert summary["notice_date"] == "2026-03-20"
     assert "Appointments in period: 3" in summary["raw_text"]
+
+def test_asic_load_all_months_none_disables_date_filter(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_fetch(path):
+        return "https://example.test/asic.xlsx"
+
+    def fake_read(path, since=None):
+        captured["since"] = since
+        return (
+            [{"acn": "123456789", "date": "2000-01-01"}],
+            {"sheet": "Data set", "columns": ["ACN"]},
+        )
+
+    monkeypatch.setattr(pipeline.asic_stats, "fetch_workbook", fake_fetch)
+    monkeypatch.setattr(pipeline.asic_stats, "read_appointments", fake_read)
+
+    appointments, info = pipeline.asic_stats.load_all(
+        months=None, workdir=str(tmp_path)
+    )
+
+    assert captured["since"] is None
+    assert len(appointments) == 1
+    assert appointments[0]["date"] == "2000-01-01"
+    assert info["since"] is None
+    assert info["rows"] == 1
+
+
+def test_asic_load_all_default_keeps_12_month_filter(monkeypatch, tmp_path):
+    import datetime
+
+    captured = {}
+
+    def fake_fetch(path):
+        return "https://example.test/asic.xlsx"
+
+    def fake_read(path, since=None):
+        captured["since"] = since
+        return ([], {"sheet": "Data set", "columns": ["ACN"]})
+
+    monkeypatch.setattr(pipeline.asic_stats, "fetch_workbook", fake_fetch)
+    monkeypatch.setattr(pipeline.asic_stats, "read_appointments", fake_read)
+
+    pipeline.asic_stats.load_all(workdir=str(tmp_path))
+
+    expected = (
+        datetime.date.today()
+        - datetime.timedelta(days=int(12 * 30.5))
+    ).isoformat()
+    assert captured["since"] == expected
