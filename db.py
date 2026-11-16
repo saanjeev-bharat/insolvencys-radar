@@ -544,3 +544,81 @@ def search(con, kind=None, state=None, status=None, q=None, limit=200):
     sql += " ORDER BY notice_date DESC, first_seen DESC, LOWER(entity_name) ASC LIMIT ?"
     args.append(limit)
     return [dict(row) for row in con.execute(sql, args)]
+
+
+def upsert_many(con, leads: list[dict]) -> int:
+    """Batch upsert leads while preserving existing upsert semantics."""
+    if not leads:
+        return 0
+
+    groups = {True: [], False: []}
+
+    for lead in leads:
+        if not isinstance(lead, dict):
+            raise TypeError("Lead must be a dictionary")
+
+        row = {column: lead.get(column) for column in COLUMNS}
+        for required in ("id", "kind", "source"):
+            if not row[required] or not str(row[required]).strip():
+                raise ValueError(
+                    f"Lead is missing required field: {required}"
+                )
+
+        preserve_confidence = lead.get("confidence") is None
+        if row["confidence"] is None:
+            row["confidence"] = 0.5
+
+        groups[preserve_confidence].append(
+            tuple(row[column] for column in COLUMNS)
+        )
+
+    placeholders = ",".join("?" for _ in COLUMNS)
+    updates = []
+
+    for column in COLUMNS:
+        if column == "id":
+            continue
+        if column == "confidence":
+            updates.append(
+                "confidence=leads.confidence"
+                if True in groups and groups[True]
+                else "confidence=excluded.confidence"
+            )
+        elif column in ("kind", "source"):
+            updates.append(f"{column}=excluded.{column}")
+        else:
+            updates.append(
+                f"{column}=CASE WHEN excluded.{column} IS NOT NULL "
+                f"AND excluded.{column} != '' THEN excluded.{column} "
+                f"ELSE leads.{column} END"
+            )
+
+    sql_template = (
+        f"INSERT INTO leads ({','.join(COLUMNS)}) "
+        f"VALUES ({placeholders}) "
+        f"ON CONFLICT(id) DO UPDATE SET "
+    )
+
+    total = 0
+    for preserve, rows in groups.items():
+        if not rows:
+            continue
+
+        group_updates = [
+            "confidence=leads.confidence"
+            if column == "confidence" and preserve
+            else "confidence=excluded.confidence"
+            if column == "confidence"
+            else update
+            for column, update in zip(
+                [c for c in COLUMNS if c != "id"], updates
+            )
+        ]
+
+        con.executemany(
+            sql_template + ",".join(group_updates),
+            rows
+        )
+        total += len(rows)
+
+    return total

@@ -37,9 +37,19 @@ def import_asic_stats(con, appointments=None, info=None):
             "source_url": workbook_source,
         })
 
+    print(
+        f"ASIC history: prepared {len(appointment_rows)} appointment rows; "
+        "starting event insertion",
+        flush=True,
+    )
     event_count = db.upsert_asic_appointments(con, appointment_rows)
+    print(f"ASIC history: stored {event_count} appointment events; "
+          "calculating latest ACN records", flush=True)
     records = asic_stats.latest_by_acn(appointments)
+    print(f"ASIC history: calculated {len(records)} ACN records; "
+          "starting company summaries", flush=True)
     count = 0
+    summary_rows = []
 
     status_map = {
         "L": "liquidation",
@@ -75,10 +85,25 @@ def import_asic_stats(con, appointments=None, info=None):
             "confidence": 1.0,
         }
 
-        db.upsert(con, lead)
+        summary_rows.append(lead)
         count += 1
 
-    print(f"ASIC statistics: stored {event_count} appointment events; updated {count} company summaries")
+        if len(summary_rows) >= 500:
+            db.upsert_many(con, summary_rows)
+            print(
+                f"ASIC history: updated {count} company summaries",
+                flush=True,
+            )
+            summary_rows.clear()
+
+    if summary_rows:
+        db.upsert_many(con, summary_rows)
+
+    print(
+        f"ASIC statistics: stored {event_count} appointment events; "
+        f"updated {count} company summaries",
+        flush=True,
+    )
     return count
 
 
