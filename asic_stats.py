@@ -59,6 +59,7 @@ def fetch_workbook(dest):
     """Download the latest ASIC workbook. Returns the URL used."""
     import httpx
 
+    print("Checking ASIC publications page...", flush=True)
     response = httpx.get(
         PAGE,
         headers={"User-Agent": C.UA},
@@ -68,7 +69,9 @@ def fetch_workbook(dest):
     response.raise_for_status()
 
     url = find_xlsx_url(response.text)
+    print("Downloading ASIC workbook:", url, flush=True)
     C.download(url, dest)
+    print("ASIC workbook download finished; validating Excel file...", flush=True)
 
     # Validate that the downloaded file is a readable Excel workbook.
     import openpyxl

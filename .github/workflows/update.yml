@@ -30,7 +30,7 @@ jobs:
       - name: Import complete ASIC appointment history into Neon
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python import_asic_history.py
+        run: python -u import_asic_history.py
 
       - name: Import ASIC records into Neon
         env:

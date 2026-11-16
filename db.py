@@ -269,7 +269,7 @@ def _get_engine(path=None):
                     cursor.execute("PRAGMA busy_timeout=30000")
                     cursor.close()
             else:
-                engine = create_engine(url, pool_pre_ping=True, pool_recycle=300, use_native_hstore=False)
+                engine = create_engine(url, connect_args={"connect_timeout": 10}, pool_pre_ping=True, pool_recycle=300, pool_timeout=15, use_native_hstore=False)
             metadata.create_all(engine)
             _engines[url] = engine
         return engine
