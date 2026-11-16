@@ -20,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint, create_engine, event, text, func,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError as SQLAlchemyIntegrityError
 
@@ -56,6 +57,28 @@ Index("idx_leads_state", leads.c.state)
 Index("idx_leads_kind", leads.c.kind)
 Index("idx_leads_date", leads.c.notice_date)
 Index("idx_leads_acn", leads.c.acn)
+
+# Individual ASIC appointment events are kept separately from the leads summary.
+asic_appointments = Table(
+    "asic_appointments", metadata,
+    Column("event_id", String, primary_key=True),
+    Column("acn", String, nullable=False),
+    Column("company_name", String),
+    Column("appointee", String),
+    Column("appointment_type", String),
+    Column("category", String),
+    Column("effective_date", String),
+    Column("industry", String),
+    Column("state", String),
+    Column("area", String),
+    Column("postcode", String),
+    Column("source", String, nullable=False),
+    Column("source_url", String),
+    Column("created_at", String, server_default=text("CURRENT_TIMESTAMP")),
+)
+Index("idx_asic_appointments_acn", asic_appointments.c.acn)
+Index("idx_asic_appointments_date", asic_appointments.c.effective_date)
+Index("idx_asic_appointments_state", asic_appointments.c.state)
 
 users = Table(
     "users", metadata,
@@ -423,6 +446,77 @@ def upsert_many(con, batch: list[dict]) -> int:
     ]
 
     con.executemany(sql, sqlite_rows)
+    return len(rows)
+
+
+
+def appointment_event_id(appointment: dict) -> str:
+    # Stable identity for one ASIC appointment event.
+    fields = (
+        str(appointment.get("acn") or "").strip(),
+        str(appointment.get("date") or "").strip(),
+        str(appointment.get("atype") or "").strip().casefold(),
+        str(appointment.get("appointee") or "").strip().casefold(),
+        str(appointment.get("name") or "").strip().casefold(),
+        str(appointment.get("industry") or "").strip().casefold(),
+        str(appointment.get("state") or "").strip().upper(),
+        str(appointment.get("area") or "").strip().casefold(),
+        str(appointment.get("postcode") or "").strip(),
+    )
+    value = "|".join(fields)
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def upsert_asic_appointments(con, batch: list[dict]) -> int:
+    # Idempotently store individual ASIC appointment events in batches.
+    if not batch:
+        return 0
+
+    columns = [
+        "event_id", "acn", "company_name", "appointee",
+        "appointment_type", "category", "effective_date", "industry",
+        "state", "area", "postcode", "source", "source_url",
+    ]
+    rows = []
+    seen = set()
+
+    for appointment in batch:
+        if not isinstance(appointment, dict):
+            raise TypeError("ASIC appointment must be a dictionary")
+        row = {column: appointment.get(column) for column in columns}
+        for required in ("event_id", "acn", "source"):
+            if not row[required] or not str(row[required]).strip():
+                raise ValueError(f"ASIC appointment is missing required field: {required}")
+        if row["event_id"] in seen:
+            continue
+        seen.add(row["event_id"])
+        rows.append(row)
+
+    if not rows:
+        return 0
+
+    insert_fn = pg_insert if con.dialect_name == "postgresql" else sqlite_insert
+    table = asic_appointments
+
+    for start in range(0, len(rows), 500):
+        chunk = rows[start:start + 500]
+        stmt = insert_fn(table).values(chunk)
+        excluded = stmt.excluded
+        updates = {}
+        for column in columns:
+            if column == "event_id":
+                continue
+            incoming = getattr(excluded, column)
+            updates[column] = func.coalesce(
+                func.nullif(incoming, ""),
+                getattr(table.c, column),
+            )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[table.c.event_id],
+            set_=updates,
+        )
+        con._connection.execute(stmt)
+
     return len(rows)
 
 

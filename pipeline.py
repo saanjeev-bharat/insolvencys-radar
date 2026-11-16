@@ -8,8 +8,36 @@ import asic_stats
 
 
 def import_asic_stats(con):
-    records, info = asic_stats.load(months=12)
+    appointments, info = asic_stats.load_all(months=12)
 
+    source = "ASIC Series 1 and 2"
+    workbook_source = info.get("file") or asic_stats.PAGE
+    if not str(workbook_source).startswith(("https://", "http://")):
+        workbook_source = asic_stats.PAGE
+    appointment_rows = []
+
+    for item in appointments:
+        acn = str(item.get("acn") or "").strip()
+        if not acn:
+            continue
+        appointment_rows.append({
+            "event_id": db.appointment_event_id(item),
+            "acn": acn,
+            "company_name": item.get("name"),
+            "appointee": item.get("appointee"),
+            "appointment_type": item.get("atype"),
+            "category": item.get("cat"),
+            "effective_date": item.get("date"),
+            "industry": item.get("industry"),
+            "state": item.get("state"),
+            "area": item.get("area"),
+            "postcode": item.get("postcode"),
+            "source": source,
+            "source_url": workbook_source,
+        })
+
+    event_count = db.upsert_asic_appointments(con, appointment_rows)
+    records = asic_stats.latest_by_acn(appointments)
     count = 0
 
     status_map = {
@@ -21,8 +49,6 @@ def import_asic_stats(con):
     for acn, item in records.items():
         if item.get("cat") not in status_map:
             continue
-
-        source = "ASIC Series 1 and 2"
 
         raw_text = (
             f"ASIC appointment: {item.get('atype', '')}; "
@@ -51,7 +77,7 @@ def import_asic_stats(con):
         db.upsert(con, lead)
         count += 1
 
-    print(f"ASIC statistics: imported {count} companies")
+    print(f"ASIC statistics: stored {event_count} appointment events; updated {count} company summaries")
     return count
 
 

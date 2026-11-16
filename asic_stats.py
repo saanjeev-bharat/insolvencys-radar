@@ -424,7 +424,7 @@ def latest_by_acn(appts):
     return best
 
 
-def load(months=12, path=None, workdir=None):
+def load_all(months=12, path=None, workdir=None):
     """Download the latest ASIC workbook, falling back to a local copy."""
 
     since = (
@@ -480,4 +480,10 @@ def load(months=12, path=None, workdir=None):
         info["columns"]
     )
 
-    return latest_by_acn(appts), info
+    return appts, info
+
+
+def load(months=12, path=None, workdir=None):
+    # Preserve the legacy latest-appointment-per-ACN return format.
+    appointments, info = load_all(months=months, path=path, workdir=workdir)
+    return latest_by_acn(appointments), info

@@ -75,3 +75,59 @@ def test_auction_is_classified():
     lead = extract_regex("Public auction of company assets")
 
     assert lead["status"] == "auction"
+
+
+def test_asic_appointment_history_is_complete_and_idempotent(tmp_path, monkeypatch):
+    appointments = [
+        {
+            "acn": "123456789", "name": "EXAMPLE PTY LTD",
+            "appointee": "JANE SMITH", "atype": "Voluntary administration",
+            "cat": "A", "date": "2026-01-10", "industry": "Construction",
+            "state": "NSW", "area": "Sydney", "postcode": "2000",
+        },
+        {
+            "acn": "123456789", "name": "EXAMPLE PTY LTD",
+            "appointee": "JOHN CITIZEN", "atype": "Receivership",
+            "cat": "R", "date": "2026-02-15", "industry": "Construction",
+            "state": "NSW", "area": "Sydney", "postcode": "2000",
+        },
+        {
+            "acn": "123456789", "name": "EXAMPLE PTY LTD",
+            "appointee": "MOHAMMAD NAJJAR",
+            "atype": "Creditors' voluntary liquidation",
+            "cat": "L", "date": "2026-03-20", "industry": "Construction",
+            "state": "NSW", "area": "Sydney", "postcode": "2000",
+        },
+    ]
+    monkeypatch.setattr(
+        pipeline.asic_stats,
+        "load_all",
+        lambda months=12: (appointments, {"file": "https://example.test/asic.xlsx"}),
+    )
+    path = str(tmp_path / "appointment-history.db")
+
+    with db.connect(path) as con:
+        first_summary_count = pipeline.import_asic_stats(con)
+        first_events = con.execute(
+            "SELECT event_id, appointment_type, effective_date "
+            "FROM asic_appointments WHERE acn=? ORDER BY effective_date",
+            ["123456789"],
+        ).fetchall()
+        assert first_summary_count == 1
+        assert len(first_events) == 3
+
+        second_summary_count = pipeline.import_asic_stats(con)
+        second_events = con.execute(
+            "SELECT event_id FROM asic_appointments WHERE acn=?",
+            ["123456789"],
+        ).fetchall()
+        summary = con.execute(
+            "SELECT status, notice_date, raw_text FROM leads WHERE acn=?",
+            ["123456789"],
+        ).fetchone()
+
+    assert second_summary_count == 1
+    assert len(second_events) == 3
+    assert summary["status"] == "liquidation"
+    assert summary["notice_date"] == "2026-03-20"
+    assert "Appointments in period: 3" in summary["raw_text"]
