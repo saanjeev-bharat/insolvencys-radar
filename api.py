@@ -17,7 +17,7 @@ import stripe
 import auth
 import email_service
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 
 import db
 
@@ -824,17 +824,32 @@ def leads(
     state: str | None = None,
     status: str | None = None,
     q: str | None = None,
-    limit: int = Query(200, ge=1, le=20000)
+    limit: int = Query(200, ge=1, le=20000),
+    offset: int = Query(0, ge=0)
 ):
     with db.connect() as con:
         return db.search(
-            con,
-            kind=kind,
-            state=state,
-            status=status,
-            q=q,
-            limit=limit
+            con, kind=kind, state=state, status=status, q=q,
+            limit=limit, offset=offset
         )
+
+
+@app.get("/api/leads/page")
+def leads_page(
+    kind: str | None = None,
+    state: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0)
+):
+    with db.connect() as con:
+        total = db.count_search(con, kind=kind, state=state, status=status, q=q)
+        items = db.search(
+            con, kind=kind, state=state, status=status, q=q,
+            limit=limit, offset=offset
+        )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/status")
@@ -845,37 +860,40 @@ def status():
 @app.get("/api/export.csv")
 def export(
     kind: str | None = None,
-    state: str | None = None
+    state: str | None = None,
+    status: str | None = None,
+    q: str | None = None
 ):
-    with db.connect() as con:
-        rows = db.search(
-            con,
-            kind=kind,
-            state=state,
-            limit=5000
-        )
-
-    buf = io.StringIO()
     cols = [c for c in db.COLUMNS if c != "raw_text"]
 
-    writer = csv.DictWriter(
-        buf,
-        fieldnames=cols,
-        extrasaction="ignore"
-    )
+    def csv_rows():
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+        writer.writeheader()
+        yield buf.getvalue()
+        offset = 0
+        batch_size = 5000
+        with db.connect() as con:
+            while True:
+                rows = db.search(
+                    con, kind=kind, state=state, status=status, q=q,
+                    limit=batch_size, offset=offset
+                )
+                if not rows:
+                    break
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerows(rows)
+                yield buf.getvalue()
+                offset += len(rows)
+                if len(rows) < batch_size:
+                    break
 
-    writer.writeheader()
-    writer.writerows(rows)
-
-    return Response(
-        content=buf.getvalue(),
+    return StreamingResponse(
+        csv_rows(),
         media_type="text/csv",
-        headers={
-            "Content-Disposition":
-            'attachment; filename="insolvency-radar.csv"'
-        }
+        headers={"Content-Disposition": 'attachment; filename="insolvencys-radar.csv"'}
     )
-
 
 @app.post("/api/refresh")
 def refresh():

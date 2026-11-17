@@ -59,7 +59,7 @@ button.copy{font:inherit;font-size:12px;color:var(--accent);background:transpare
 
 <div class="wrap">
 <header>
-  <h1>Insolvency Radar</h1>
+  <h1>Insolvencys Radar</h1>
   <p>Companies in liquidation, administration or receivership, plus insolvency auctions and mortgagee sales. Each card shows the appointed practitioner to contact.</p>
 </header>
 <div class="bar">
@@ -68,20 +68,20 @@ button.copy{font:inherit;font-size:12px;color:var(--accent);background:transpare
   <select id="kind" aria-label="Type"><option value="">All types</option><option value="insolvency">Insolvency notices</option><option value="auction">Asset auctions</option><option value="mortgagee_sale">Mortgagee sales</option></select>
 </div>
 <p class="count" id="count"></p>
-<div class="grid" id="out"></div>
+<div class="grid" id="out"></div>\n <div id="pagination" class="pagination"></div>
 </div>
 
 <script>
 var DATA=[];
+var PAGE=0, PAGE_SIZE=100, TOTAL=0, requestSeq=0, searchTimer=null;
 var LABEL={liquidation:"Liquidation",administration:"Administration",receivership:"Receivership",auction:"Asset auction",mortgagee_sale:"Mortgagee sale"};
 var KIND_LABEL=LABEL;
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function fmt(d){if(!d)return"n/a";var p=d.split("-");var m=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];return +p[2]+" "+m[+p[1]-1]+" "+p[0]}
 function line(label,val){return val?'<div class="line"><span class="label">'+label+'</span><span class="val">'+esc(val)+'</span><button class="copy" data-v="'+esc(val)+'" type="button">Copy</button></div>':""}
 function render(){
-  var q=document.getElementById("q").value.toLowerCase(),st=document.getElementById("state").value,k=document.getElementById("kind").value;
-  var rows=DATA.filter(function(r){return(!st||r.state===st)&&(!k||r.kind===k)&&(!q||(r.name+" "+(r.asset||"")+" "+r.postcode).toLowerCase().indexOf(q)>-1)});
-  document.getElementById("count").textContent=rows.length+" of "+DATA.length+" records";
+  var rows=DATA;
+  document.getElementById("count").textContent=TOTAL.toLocaleString()+" matching records · showing "+(TOTAL?PAGE*PAGE_SIZE+1:0)+"–"+Math.min((PAGE+1)*PAGE_SIZE,TOTAL);
   document.getElementById("out").innerHTML=rows.length?rows.map(function(r){
     return '<article class="card"><h2>'+esc(r.name)+'</h2>'+
     '<div class="tags"><span class="tag t-'+r.status+'">'+esc(LABEL[r.status]||r.status)+'</span><span class="tag loc">'+esc(r.state)+' '+esc(r.postcode)+'</span></div>'+
@@ -90,19 +90,33 @@ function render(){
     '<div class="dates">Notice '+fmt(r.notice)+' · <b>Next date '+fmt(r.deadline)+'</b></div>'+
     '<div class="contact"><span class="label">Contact</span><span class="who">'+esc(r.person)+'</span><span class="firm">'+esc(r.firm)+'</span>'+line("Phone",r.phone)+line("Email",r.email)+'</div>'+
     (r.url?'<div class="line"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">Source notice</a></div>':'')+'<div class="conf">Extraction confidence '+r.conf.toFixed(2)+'. Verify against the source notice.</div></article>';
-  }).join(""):'<p class="empty">No records yet. The app collects notices when it starts and then once a day. Reload in a few minutes.</p>';
+  }).join(""):'<p class="empty">No matching records found.</p>';
+  var pages=Math.ceil(TOTAL/PAGE_SIZE);
+  document.getElementById("pagination").innerHTML=pages>1?
+    '<button type="button" id="prevPage" '+(PAGE===0?'disabled':'')+'>Previous</button> <span>Page '+(PAGE+1)+' of '+pages+'</span> <button type="button" id="nextPage" '+(PAGE+1>=pages?'disabled':'')+'>Next</button>':'';
 }
-document.addEventListener("input",function(e){if(e.target.id==="q")render()});
-document.addEventListener("change",function(e){if(e.target.id==="state"||e.target.id==="kind")render()});
-document.addEventListener("click",function(e){var b=e.target.closest("button.copy");if(!b)return;
-  try{navigator.clipboard.writeText(b.getAttribute("data-v")).then(function(){b.textContent="Copied"},function(){b.textContent="Select text"})}catch(x){b.textContent="Select text"}
-  setTimeout(function(){b.textContent="Copy"},1500)});
-function load(){
-  fetch("/api/leads?limit=20000").then(function(r){return r.json()}).then(function(rows){
-    DATA=rows.map(function(r){return{kind:r.kind,status:r.status||r.kind,name:r.entity_name||r.asset_summary||"Unnamed",acn:r.acn,abn:r.abn,state:r.state||"",postcode:r.postcode||"",notice:r.notice_date,deadline:r.deadline,asset:r.asset_summary,person:r.contact_name||"See notice",firm:r.contact_firm||"",phone:r.contact_phone,email:r.contact_email,conf:r.confidence||0,url:r.source_url}});
+function loadPage(){
+  var seq=++requestSeq;
+  var params=new URLSearchParams({limit:String(PAGE_SIZE),offset:String(PAGE*PAGE_SIZE)});
+  var q=document.getElementById("q").value.trim(),st=document.getElementById("state").value,k=document.getElementById("kind").value;
+  if(q)params.set("q",q);if(st)params.set("state",st);if(k)params.set("kind",k);
+  document.getElementById("count").textContent="Loading records…";
+  fetch("/api/leads/page?"+params.toString()).then(function(r){if(!r.ok)throw new Error("Request failed");return r.json()}).then(function(data){
+    if(seq!==requestSeq)return;
+    TOTAL=data.total||0;
+    DATA=(data.items||[]).map(function(r){return{kind:r.kind,status:r.status||r.kind,name:r.entity_name||r.asset_summary||"Unnamed",acn:r.acn,abn:r.abn,state:r.state||"",postcode:r.postcode||"",notice:r.notice_date,deadline:r.deadline,asset:r.asset_summary,person:r.contact_name||"See notice",firm:r.contact_firm||"",phone:r.contact_phone,email:r.contact_email,conf:Number(r.confidence)||0,url:r.source_url}});
     render();
-  }).catch(function(){document.getElementById("count").textContent="Could not load data."});
+  }).catch(function(){if(seq===requestSeq)document.getElementById("count").textContent="Could not load data. Please try again."});
 }
+document.addEventListener("input",function(e){if(e.target.id==="q"){PAGE=0;clearTimeout(searchTimer);searchTimer=setTimeout(loadPage,300)}});
+document.addEventListener("change",function(e){if(e.target.id==="state"||e.target.id==="kind"){PAGE=0;loadPage()}});
+document.addEventListener("click",function(e){
+  if(e.target.id==="prevPage"){PAGE=Math.max(0,PAGE-1);loadPage();return}
+  if(e.target.id==="nextPage"){PAGE++;loadPage();return}
+  var b=e.target.closest("button.copy");if(!b)return;
+  try{navigator.clipboard.writeText(b.getAttribute("data-v")).then(function(){b.textContent="Copied"},function(){b.textContent="Select text"})}catch(x){b.textContent="Select text"}
+  setTimeout(function(){b.textContent="Copy"},1500)
+});
 if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(function(){})}
 load();
 </script>

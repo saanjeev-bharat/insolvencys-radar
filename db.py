@@ -520,8 +520,8 @@ def upsert_asic_appointments(con, batch: list[dict]) -> int:
     return len(rows)
 
 
-def search(con, kind=None, state=None, status=None, q=None, limit=200):
-    sql = "SELECT * FROM leads WHERE 1=1"
+def _lead_search_where(kind=None, state=None, status=None, q=None):
+    sql = " WHERE 1=1"
     args = []
     if kind:
         sql += " AND kind=?"
@@ -533,16 +533,37 @@ def search(con, kind=None, state=None, status=None, q=None, limit=200):
         sql += " AND status=?"
         args.append(status)
     if q and str(q).strip():
-        sql += " AND (LOWER(entity_name) LIKE LOWER(?) OR LOWER(asset_summary) LIKE LOWER(?) OR LOWER(suburb) LIKE LOWER(?))"
         term = f"%{str(q).strip()}%"
-        args.extend([term] * 3)
+        fields = ("entity_name", "asset_summary", "suburb", "postcode",
+                  "acn", "abn", "contact_name", "contact_firm")
+        sql += " AND (" + " OR ".join(
+            "LOWER(COALESCE(" + field + ",'')) LIKE LOWER(?)" for field in fields
+        ) + ")"
+        args.extend([term] * len(fields))
+    return sql, args
+
+
+def count_search(con, kind=None, state=None, status=None, q=None):
+    where, args = _lead_search_where(kind, state, status, q)
+    row = con.execute("SELECT COUNT(*) AS total FROM leads" + where, args).fetchone()
+    return int(row["total"] if hasattr(row, "keys") else row[0])
+
+
+def search(con, kind=None, state=None, status=None, q=None, limit=200, offset=0):
+    where, args = _lead_search_where(kind, state, status, q)
     try:
         limit = int(limit)
     except (TypeError, ValueError):
         limit = 200
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        offset = 0
     limit = max(1, min(limit, 20000))
-    sql += " ORDER BY notice_date DESC, first_seen DESC, LOWER(entity_name) ASC LIMIT ?"
-    args.append(limit)
+    offset = max(0, offset)
+    sql = ("SELECT * FROM leads" + where +
+           " ORDER BY notice_date DESC, first_seen DESC, LOWER(entity_name) ASC LIMIT ? OFFSET ?")
+    args.extend([limit, offset])
     return [dict(row) for row in con.execute(sql, args)]
 
 
