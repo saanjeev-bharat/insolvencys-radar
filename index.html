@@ -199,7 +199,7 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){retur
 function n0(n){return Number(n||0).toLocaleString("en-AU")}
 function acnFmt(a){return a&&a.length===9?a.slice(0,3)+" "+a.slice(3,6)+" "+a.slice(6):a||""}
 function abnFmt(b){return b&&b.length===11?b.slice(0,2)+" "+b.slice(2,5)+" "+b.slice(5,8)+" "+b.slice(8):b||""}
-function fmt(d){if(!d)return"";var p=d.split("-");return p.length===3?(+p[2])+" "+MON[+p[1]-1]+" "+p[0]:d}
+function fmt(d){if(!d)return"";var m=String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?(+m[3])+" "+(MON[+m[2]-1]||"")+" "+m[1]:String(d)}
 function daysAgo(d){return (Date.now()-new Date(d+"T00:00:00Z").getTime())/864e5}
 function isNew(r){return META.baseline&&r.f>META.baseline&&daysAgo(r.f)<=14}
 function normalize(r){
