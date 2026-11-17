@@ -1,0 +1,41 @@
+name: Import historical ASIC ACNs
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Set true only after reviewing a successful dry-run"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  classify-historical-acns:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install database dependencies
+        run: pip install "sqlalchemy>=2,<3" "psycopg[binary]>=3.2,<4"
+
+      - name: Dry-run historical ACN classification
+        if: ${{ inputs.apply == false }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -u import_historical_acns.py
+
+      - name: Apply historical ACN classification
+        if: ${{ inputs.apply == true }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -u import_historical_acns.py --apply
