@@ -230,7 +230,8 @@ def read_directory(path):
     for row in read_table(path):
 
         name = (
-            _pick(row, "liquidator", "name")
+            _pick(row, "liq", "name")
+            or _pick(row, "liquidator", "name")
             or _pick(row, "name", avoid=("firm",))
         )
 
@@ -249,12 +250,13 @@ def read_directory(path):
             "deceased",
             "removed",
             "resign",
+            "susp",
         )
 
         if any(term in status for term in inactive_terms):
             continue
 
-        number = _pick(row, "number")
+        number = _pick(row, "liq", "num") or _pick(row, "number")
         key = (_norm(name), number)
 
         if key in seen:
@@ -266,7 +268,7 @@ def read_directory(path):
             "name": name,
             "tokens": tokens(name),
             "firm": _pick(row, "firm"),
-            "town": _pick(row, "town").title(),
+            "town": (_pick(row, "add", "local") or _pick(row, "town")).title(),
             "state": _pick(row, "state").upper(),
         })
 
