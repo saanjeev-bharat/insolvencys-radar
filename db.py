@@ -80,6 +80,14 @@ Index("idx_asic_appointments_acn", asic_appointments.c.acn)
 Index("idx_asic_appointments_date", asic_appointments.c.effective_date)
 Index("idx_asic_appointments_state", asic_appointments.c.state)
 
+# ACNs retained from earlier ASIC datasets, separate from the current dataset.
+asic_historical_acns = Table(
+    "asic_historical_acns", metadata,
+    Column("acn", String, primary_key=True),
+    Column("source", String, nullable=False),
+    Column("classified_at", String, server_default=text("CURRENT_TIMESTAMP")),
+)
+
 users = Table(
     "users", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -520,7 +528,7 @@ def upsert_asic_appointments(con, batch: list[dict]) -> int:
     return len(rows)
 
 
-def _lead_search_where(kind=None, state=None, status=None, q=None, since=None):
+def _lead_search_where(kind=None, state=None, status=None, q=None, since=None, dataset=None):
     sql = " WHERE 1=1"
     args = []
     if kind:
@@ -532,6 +540,13 @@ def _lead_search_where(kind=None, state=None, status=None, q=None, since=None):
     if status:
         sql += " AND status=?"
         args.append(status)
+    if dataset:
+        if dataset == "current":
+            sql += " AND kind='asic_company' AND NOT EXISTS (SELECT 1 FROM asic_historical_acns h WHERE TRIM(COALESCE(h.acn,''))=TRIM(COALESCE(leads.acn,'')))"
+        elif dataset == "historical":
+            sql += " AND kind='asic_company' AND EXISTS (SELECT 1 FROM asic_historical_acns h WHERE TRIM(COALESCE(h.acn,''))=TRIM(COALESCE(leads.acn,'')))"
+        else:
+            raise ValueError("Invalid dataset filter")
     if q and str(q).strip():
         term = f"%{str(q).strip()}%"
         fields = ("entity_name", "asset_summary", "suburb", "postcode",
@@ -546,14 +561,14 @@ def _lead_search_where(kind=None, state=None, status=None, q=None, since=None):
     return sql, args
 
 
-def count_search(con, kind=None, state=None, status=None, q=None, since=None):
-    where, args = _lead_search_where(kind, state, status, q, since)
+def count_search(con, kind=None, state=None, status=None, q=None, since=None, dataset=None):
+    where, args = _lead_search_where(kind, state, status, q, since, dataset)
     row = con.execute("SELECT COUNT(*) AS total FROM leads" + where, args).fetchone()
     return int(row["total"] if hasattr(row, "keys") else row[0])
 
 
-def search(con, kind=None, state=None, status=None, q=None, limit=200, offset=0, since=None):
-    where, args = _lead_search_where(kind, state, status, q, since)
+def search(con, kind=None, state=None, status=None, q=None, limit=200, offset=0, since=None, dataset=None):
+    where, args = _lead_search_where(kind, state, status, q, since, dataset)
     try:
         limit = int(limit)
     except (TypeError, ValueError):

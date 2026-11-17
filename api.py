@@ -840,6 +840,7 @@ def leads_page(
     state: str | None = None,
     status: str | None = None,
     category: str | None = None,
+    dataset: str | None = None,
     days: int | None = Query(None, ge=1, le=3650),
     q: str | None = None,
     limit: int = Query(100, ge=1, le=500),
@@ -858,12 +859,14 @@ def leads_page(
         if category not in categories:
             raise HTTPException(status_code=400, detail="Invalid category")
         kind, status = categories[category]
+    if dataset not in (None, "", "current", "historical"):
+        raise HTTPException(status_code=400, detail="Invalid dataset")
     since = (date.today() - timedelta(days=days)).isoformat() if days else None
     with db.connect() as con:
-        total = db.count_search(con, kind=kind, state=state, status=status, q=q, since=since)
+        total = db.count_search(con, kind=kind, state=state, status=status, q=q, since=since, dataset=dataset or None)
         items = db.search(
             con, kind=kind, state=state, status=status, q=q,
-            limit=limit, offset=offset, since=since
+            limit=limit, offset=offset, since=since, dataset=dataset or None
         )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -878,8 +881,13 @@ def export(
     kind: str | None = None,
     state: str | None = None,
     status: str | None = None,
-    q: str | None = None
+    q: str | None = None,
+    dataset: str | None = None
 ):
+    from fastapi import HTTPException
+    if dataset not in (None, "", "current", "historical"):
+        raise HTTPException(status_code=400, detail="Invalid dataset")
+
     cols = [c for c in db.COLUMNS if c != "raw_text"]
 
     def csv_rows():
@@ -893,7 +901,7 @@ def export(
             while True:
                 rows = db.search(
                     con, kind=kind, state=state, status=status, q=q,
-                    limit=batch_size, offset=offset
+                    limit=batch_size, offset=offset, dataset=dataset or None
                 )
                 if not rows:
                     break

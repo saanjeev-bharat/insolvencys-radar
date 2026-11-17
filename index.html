@@ -87,6 +87,7 @@ footer a{color:var(--accent)}
   <div class="accountbar"><span class="account-status" id="accountStatus">Free public search</span><button id="watchlistBtn" type="button">My watchlist</button><button id="accountBtn" class="primary" type="button">Login / Register</button></div>
 </header>
 <div class="bar">
+  <select id="dataset" aria-label="Dataset"><option value="">All records</option><option value="current">Current ASIC companies</option><option value="historical">Historical ASIC companies</option></select>
   <input id="q" type="search" placeholder="Search company, ACN, practitioner, suburb or postcode" aria-label="Search" autocomplete="off">
   <select id="state" aria-label="State"><option value="">All states</option><option>NSW</option><option>VIC</option><option>QLD</option><option>WA</option><option>SA</option><option>TAS</option><option>ACT</option><option>NT</option></select>
   <select id="kind" aria-label="Type">
@@ -272,7 +273,8 @@ function fetchPage(append){
   var params=new URLSearchParams();
   params.set("limit",String(PAGE));params.set("offset",String(append?DATA.length:0));
   var q=$("q").value.trim(),st=$("state").value,k=$("kind").value,pd=$("period").value;
-  if(q)params.set("q",q);if(st)params.set("state",st);if(k)params.set("category",k);if(pd)params.set("days",pd);
+  var ds=$("dataset").value;
+  if(q)params.set("q",q);if(st)params.set("state",st);if(k)params.set("category",k);if(pd)params.set("days",pd);if(ds)params.set("dataset",ds);
   $("count").textContent="Loading records…";
   $("more").disabled=true;
   return fetch(LIST_API+"/api/leads/page?"+params.toString()).then(function(r){if(!r.ok)throw Error("API "+r.status);return r.json()}).then(function(j){
@@ -285,7 +287,7 @@ function fetchPage(append){
 function load(){loadSummary().then(function(){fetchPage(false)});}
 var timer;
 $("q").addEventListener("input",function(){clearTimeout(timer);timer=setTimeout(function(){fetchPage(false)},300)});
-["state","kind","period"].forEach(function(id){$(id).addEventListener("change",function(){fetchPage(false)})});
+["state","kind","period","dataset"].forEach(function(id){$(id).addEventListener("change",function(){fetchPage(false)})});
 $("more").addEventListener("click",function(){if(DATA.length<TOTAL)fetchPage(true)});
 document.addEventListener("click",function(e){
   var b=e.target.closest("button[data-acn]"); if(!b)return;
