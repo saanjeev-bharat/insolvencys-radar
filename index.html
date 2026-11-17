@@ -187,10 +187,11 @@ footer a{color:var(--accent)}
 </dialog>
 
 <script>
-var PAGE=60, shown=PAGE, DATA=[], META={};
-var KIND={L:"Liquidation",A:"Administration",R:"Receivership or controller",O:"External administration",E:"In external administration",S:"Strike-off in progress"};
+var PAGE=60, shown=0, DATA=[], META={}, SUMMARY=[], TOTAL=0;
+var KIND={L:"Liquidation",A:"Administration",R:"Receivership or controller",E:"In external administration",S:"Strike-off in progress"};
 var STATUS={EXAD:"Status: in external administration",SOFF:"Status: strike-off in progress",REGD:"Status: registered",DRGD:"Status: deregistered",NOAC:"Status: not active"};
 var NOTICES="https://publishednotices.asic.gov.au/browsesearch-notices/";
+var LIST_API="https://insolvencys-radar.onrender.com";
 var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 var SRC={appointments:"appointment records",company_status:"company status",liquidator_register:"liquidator register"};
 function $(id){return document.getElementById(id)}
@@ -201,14 +202,12 @@ function abnFmt(b){return b&&b.length===11?b.slice(0,2)+" "+b.slice(2,5)+" "+b.s
 function fmt(d){if(!d)return"";var p=d.split("-");return p.length===3?(+p[2])+" "+MON[+p[1]-1]+" "+p[0]:d}
 function daysAgo(d){return (Date.now()-new Date(d+"T00:00:00Z").getTime())/864e5}
 function isNew(r){return META.baseline&&r.f>META.baseline&&daysAgo(r.f)<=14}
-function filtered(){
-  var q=$("q").value.trim().toLowerCase(), st=$("state").value, k=$("kind").value, pd=+$("period").value||0;
-  return DATA.filter(function(r){
-    if(st&&r.st!==st)return false;
-    if(k&&r.k!==k&&!(k==="R"&&r.k==="O"))return false;
-    if(pd&&!(r.d&&daysAgo(r.d)<=pd))return false;
-    return !q||r._q.indexOf(q)>-1;
-  });
+function normalize(r){
+  var codes={liquidation:"L",administration:"A",receivership:"R",external_administration:"E",strike_off:"S"};
+  var k=codes[r.status]||"";
+  return {n:r.entity_name||r.asset_summary||"Unnamed company",a:r.acn||"",b:r.abn||"",st:r.state||"",ar:r.suburb||"",pc:r.postcode||"",
+    "in":r.asset_summary||"",d:r.notice_date||"",f:r.first_seen||"",ap:r.contact_name||"",fm:r.contact_firm||"",pt:r.contact_phone||"",
+    k:k,p:KIND[k]||r.status||"",s:"",_q:[r.entity_name,r.acn,r.abn,r.contact_name,r.contact_firm,r.suburb,r.postcode,r.asset_summary].join(" ").toLowerCase()};
 }
 function who(r){
   var h='<div class="who"><span class="label">Appointed practitioner</span>';
@@ -233,7 +232,7 @@ function card(r){
   var meta=[];
   if(loc)meta.push('<strong>'+esc(loc)+'</strong>');
   if(r["in"])meta.push(esc(r["in"]));
-  var when=r.d?'Appointed '+esc(fmt(r.d))+(r.na>1?' ('+r.na+' appointments in period)':''):'Added to radar '+esc(fmt(r.f));
+  var when=r.d?'Appointed '+esc(fmt(r.d)):'Added to radar '+esc(fmt(r.f));
   return '<article class="card"><h2>'+esc(r.n)+'</h2><button class="save-company" type="button" data-save-acn="'+esc(r.a)+'" data-save-name="'+esc(r.n)+'">＋ Save to watchlist</button>'+
   '<div class="tags"><span class="tag k-'+esc(r.k||"O")+'">'+esc(kind)+'</span>'+
   (r.s&&STATUS[r.s]?'<span class="tag t-line">'+esc(STATUS[r.s])+'</span>':'')+(isNew(r)?'<span class="tag t-new">New</span>':'')+'</div>'+
@@ -242,17 +241,16 @@ function card(r){
   '<div class="meta">'+when+'</div>'+who(r)+'</article>';
 }
 function render(){
-  var rows=filtered(), part=rows.slice(0,shown);
-  $("count").textContent=n0(rows.length)+" of "+n0(DATA.length)+" companies";
-  $("out").innerHTML=part.length?part.map(card).join(""):'<p class="empty">No companies match. Try a shorter name or clear a filter.</p>';
-  $("more").hidden=rows.length<=shown;
-  $("more").textContent="Show "+n0(Math.min(PAGE,rows.length-shown))+" more";
+  $("count").textContent=n0(DATA.length)+" of "+n0(TOTAL)+" records";
+  $("out").innerHTML=DATA.length?DATA.map(card).join(""):'<p class="empty">No records match. Try a shorter name or clear a filter.</p>';
+  $("more").hidden=DATA.length>=TOTAL;
+  $("more").textContent="Show "+n0(Math.min(PAGE,TOTAL-DATA.length))+" more";
 }
 function stats(){
   if(META.sample){$("stats").innerHTML="";return}
-  var rec=DATA.filter(function(r){return r.d&&daysAgo(r.d)<=30}).length;
-  var named=DATA.filter(function(r){return r.ap}).length;
-  $("stats").innerHTML='<li><b>'+n0(DATA.length)+'</b>companies listed</li>'+
+  var rec=SUMMARY.filter(function(r){return r.d&&daysAgo(r.d)<=30}).length;
+  var named=SUMMARY.filter(function(r){return r.ap}).length;
+  $("stats").innerHTML='<li><b>'+n0(SUMMARY.length)+'</b>companies listed</li>'+
     '<li><b>'+n0(rec)+'</b>appointed in the last 30 days</li>'+
     '<li><b>'+n0(named)+'</b>with a named practitioner</li>';
 }
@@ -262,19 +260,33 @@ function warn(){
   $("warn").hidden=false;
   $("warn").textContent="Some data could not be collected this week ("+bad.map(function(k){return SRC[k]||k}).join(", ")+"). Records may be incomplete or out of date.";
 }
-function load(){
-  fetch("leads.json?v="+Date.now()).then(function(r){return r.json()}).then(function(j){
-    META=j.meta||{}; DATA=j.leads||[];
-    DATA.forEach(function(r){r._q=[r.n,r.a,r.ap,r.fm,r.ar,r.pc,r["in"]].join(" ").toLowerCase()});
-    var note=$("note"); note.hidden=false;
+function loadSummary(){
+  return fetch("leads.json?v="+Date.now()).then(function(r){if(!r.ok)throw Error("summary");return r.json()}).then(function(j){
+    META=j.meta||{}; SUMMARY=j.leads||[];
+    var note=$("note");note.hidden=false;
     note.textContent=META.sample?"These are fictional sample records. Real companies appear after the first weekly update.":"Data updated "+(META.updated||"unknown")+". Covers appointments from the last "+(META.months||12)+" months.";
-    stats(); warn(); render();
-  }).catch(function(){$("count").textContent="Could not load data. Reload the page."});
+    stats();warn();
+  }).catch(function(){ $("stats").innerHTML=""; $("note").hidden=true; });
 }
+function fetchPage(append){
+  var params=new URLSearchParams();
+  params.set("limit",String(PAGE));params.set("offset",String(append?DATA.length:0));
+  var q=$("q").value.trim(),st=$("state").value,k=$("kind").value,pd=$("period").value;
+  if(q)params.set("q",q);if(st)params.set("state",st);if(k)params.set("category",k);if(pd)params.set("days",pd);
+  $("count").textContent="Loading records…";
+  $("more").disabled=true;
+  return fetch(LIST_API+"/api/leads/page?"+params.toString()).then(function(r){if(!r.ok)throw Error("API "+r.status);return r.json()}).then(function(j){
+    var rows=(j.items||[]).map(normalize);
+    DATA=append?DATA.concat(rows):rows;
+    TOTAL=Number(j.total||0);
+    render();
+  }).catch(function(){ $("count").textContent="Could not load records from the database. Please reload the page."; }).finally(function(){ $("more").disabled=false; });
+}
+function load(){loadSummary().then(function(){fetchPage(false)});}
 var timer;
-$("q").addEventListener("input",function(){clearTimeout(timer);timer=setTimeout(function(){shown=PAGE;render()},150)});
-["state","kind","period"].forEach(function(id){$(id).addEventListener("change",function(){shown=PAGE;render()})});
-$("more").addEventListener("click",function(){shown+=PAGE;render()});
+$("q").addEventListener("input",function(){clearTimeout(timer);timer=setTimeout(function(){fetchPage(false)},300)});
+["state","kind","period"].forEach(function(id){$(id).addEventListener("change",function(){fetchPage(false)})});
+$("more").addEventListener("click",function(){if(DATA.length<TOTAL)fetchPage(true)});
 document.addEventListener("click",function(e){
   var b=e.target.closest("button[data-acn]"); if(!b)return;
   var txt=acnFmt(b.getAttribute("data-acn")), old=b.textContent;
@@ -283,6 +295,8 @@ document.addEventListener("click",function(e){
 });
 if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){})}
 load();
+
+
 
 // Customer account integration. Set this to the deployed Render service URL after deployment.
 var API_BASE = window.RADAR_API_BASE || "https://insolvencys-radar.onrender.com";

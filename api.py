@@ -839,15 +839,31 @@ def leads_page(
     kind: str | None = None,
     state: str | None = None,
     status: str | None = None,
+    category: str | None = None,
+    days: int | None = Query(None, ge=1, le=3650),
     q: str | None = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0)
 ):
+    from datetime import date, timedelta
+    from fastapi import HTTPException
+    categories = {
+        "L": ("insolvency", "liquidation"),
+        "A": ("insolvency", "administration"),
+        "R": ("insolvency", "receivership"),
+        "E": ("asic_company", "external_administration"),
+        "S": ("asic_company", "strike_off"),
+    }
+    if category:
+        if category not in categories:
+            raise HTTPException(status_code=400, detail="Invalid category")
+        kind, status = categories[category]
+    since = (date.today() - timedelta(days=days)).isoformat() if days else None
     with db.connect() as con:
-        total = db.count_search(con, kind=kind, state=state, status=status, q=q)
+        total = db.count_search(con, kind=kind, state=state, status=status, q=q, since=since)
         items = db.search(
             con, kind=kind, state=state, status=status, q=q,
-            limit=limit, offset=offset
+            limit=limit, offset=offset, since=since
         )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 

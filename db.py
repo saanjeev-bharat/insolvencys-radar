@@ -520,7 +520,7 @@ def upsert_asic_appointments(con, batch: list[dict]) -> int:
     return len(rows)
 
 
-def _lead_search_where(kind=None, state=None, status=None, q=None):
+def _lead_search_where(kind=None, state=None, status=None, q=None, since=None):
     sql = " WHERE 1=1"
     args = []
     if kind:
@@ -540,17 +540,20 @@ def _lead_search_where(kind=None, state=None, status=None, q=None):
             "LOWER(COALESCE(" + field + ",'')) LIKE LOWER(?)" for field in fields
         ) + ")"
         args.extend([term] * len(fields))
+    if since:
+        sql += ' AND notice_date >= ?'
+        args.append(since)
     return sql, args
 
 
-def count_search(con, kind=None, state=None, status=None, q=None):
-    where, args = _lead_search_where(kind, state, status, q)
+def count_search(con, kind=None, state=None, status=None, q=None, since=None):
+    where, args = _lead_search_where(kind, state, status, q, since)
     row = con.execute("SELECT COUNT(*) AS total FROM leads" + where, args).fetchone()
     return int(row["total"] if hasattr(row, "keys") else row[0])
 
 
-def search(con, kind=None, state=None, status=None, q=None, limit=200, offset=0):
-    where, args = _lead_search_where(kind, state, status, q)
+def search(con, kind=None, state=None, status=None, q=None, limit=200, offset=0, since=None):
+    where, args = _lead_search_where(kind, state, status, q, since)
     try:
         limit = int(limit)
     except (TypeError, ValueError):
