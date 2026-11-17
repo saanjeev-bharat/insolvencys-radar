@@ -150,7 +150,7 @@ def _xlsx_rows(path):
     import openpyxl
 
     workbook = openpyxl.load_workbook(
-        path,
+        io.BytesIO(open(path, "rb").read()),
         read_only=True,
         data_only=True,
     )
