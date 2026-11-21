@@ -556,7 +556,7 @@ def _lead_search_where(kind=None, state=None, status=None, q=None, since=None, d
         ) + ")"
         args.extend([term] * len(fields))
     if since:
-        sql += ' AND notice_date >= ?'
+        sql += " AND COALESCE(NULLIF(notice_date, ''), NULLIF(first_seen, '')) >= ?"
         args.append(since)
     return sql, args
 
