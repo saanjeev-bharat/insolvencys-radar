@@ -142,6 +142,58 @@ password_reset_tokens = Table(
 )
 Index("idx_password_reset_user", password_reset_tokens.c.user_id)
 
+# Counts free-tier company searches by UTC calendar day. This is additive and
+# does not alter existing customer, subscription, or watchlist records.
+search_usage = Table(
+    "search_usage", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("usage_date", String, nullable=False),
+    Column("search_count", Integer, nullable=False, server_default="0"),
+    Column("created_at", String, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("updated_at", String, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    UniqueConstraint("user_id", "usage_date", name="uq_search_usage_user_day"),
+)
+Index("idx_search_usage_user_day", search_usage.c.user_id, search_usage.c.usage_date)
+
+# One registered desktop/laptop and one registered mobile browser per paid user.
+user_devices = Table(
+    "user_devices", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("device_type", String, nullable=False),
+    Column("device_hash", String, nullable=False),
+    Column("device_label", String),
+    Column("registered_at", String, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("last_seen_at", String, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    UniqueConstraint("user_id", "device_type", name="uq_user_device_type"),
+    UniqueConstraint("user_id", "device_hash", name="uq_user_device_hash"),
+)
+Index("idx_user_devices_user", user_devices.c.user_id)
+
+device_change_tokens = Table(
+    "device_change_tokens", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("device_type", String, nullable=False),
+    Column("device_hash", String, nullable=False),
+    Column("device_label", String),
+    Column("token_hash", String, nullable=False, unique=True),
+    Column("expires_at", String, nullable=False),
+    Column("used_at", String),
+    Column("created_at", String, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+Index("idx_device_change_user", device_change_tokens.c.user_id)
+
+device_change_history = Table(
+    "device_change_history", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("device_type", String, nullable=False),
+    Column("changed_at", String, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+Index("idx_device_change_history_user", device_change_history.c.user_id, device_change_history.c.changed_at)
+
 
 class CompatRow(Mapping):
     """SQLAlchemy row supporting both row['column'] and row[0]."""

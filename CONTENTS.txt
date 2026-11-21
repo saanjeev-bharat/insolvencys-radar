@@ -1,0 +1,15 @@
+Insolvency Pulse membership integration patch
+
+Replace these backend files in the existing GitHub repository:
+- api.py
+- db.py
+- email_service.py
+
+Replace/add this test file:
+- tests/test_customer_api.py
+
+Replace the active WordPress plugin file with:
+- wordpress-plugin/insolvency-pulse-api/insolvency-pulse-api.php
+
+Read MEMBERSHIP_INTEGRATION_DEPLOYMENT.md before deploying.
+No .env files, passwords, API keys, Stripe secrets, or database credentials are included.

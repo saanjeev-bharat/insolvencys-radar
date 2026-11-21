@@ -4,7 +4,7 @@ import io
 import os
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import threading
 import time
 from pathlib import Path
@@ -47,48 +47,161 @@ class WatchlistRequest(BaseModel):
 class CheckoutRequest(BaseModel):
     plan: str = Field(pattern=r"^(starter|professional|business)$")
 
+class DeviceRegistrationRequest(BaseModel):
+    device_id: str = Field(min_length=20, max_length=128)
+    device_label: str | None = Field(default=None, max_length=120)
+
+class DeviceVerificationRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+def _subscription_plan(user_id: int) -> str:
+    """Return a paid plan only when a corresponding subscription is current."""
+    now = datetime.now(timezone.utc)
+    with db.connect() as con:
+        rows = con.execute(
+            """
+            SELECT plan, status, current_period_end
+            FROM subscriptions
+            WHERE user_id = ?
+              AND status IN ('active', 'trialing')
+            ORDER BY updated_at DESC
+            """,
+            (user_id,)
+        ).fetchall()
+
+    for row in rows:
+        plan = str(row["plan"] or "").lower()
+        if plan not in ("starter", "professional", "business"):
+            continue
+        end_value = row["current_period_end"]
+        if not end_value:
+            # Stripe subscriptions should carry a billing period end. Fail
+            # closed rather than granting indefinite paid access.
+            continue
+        try:
+            expiry = datetime.fromisoformat(str(end_value).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if expiry >= now:
+            return plan
+    return "free"
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security)
 ):
-    """Verify the login token and retrieve the active customer."""
-
+    """Verify the login token and retrieve the active customer and entitlement."""
     if credentials is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required."
-        )
+        raise HTTPException(status_code=401, detail="Authentication required.")
 
     try:
         payload = auth.decode_access_token(credentials.credentials)
         user_id = int(payload["sub"])
-
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired login token."
-        )
+        raise HTTPException(status_code=401, detail="Invalid or expired login token.")
 
     with db.connect() as con:
         user = con.execute(
-            """
-            SELECT id, email, plan, is_active
-            FROM users
-            WHERE id=?
-            """,
+            "SELECT id, email, plan, is_active FROM users WHERE id=?",
             (user_id,)
         ).fetchone()
 
     if user is None or not user["is_active"]:
-        raise HTTPException(
-            status_code=401,
-            detail="Customer account is unavailable."
-        )
+        raise HTTPException(status_code=401, detail="Customer account is unavailable.")
 
-    return dict(user)
+    result = dict(user)
+    result["plan"] = _subscription_plan(user_id)
+    return result
+
+
+def get_verified_device_user(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """For paid data access, require the registered device cookie identifier."""
+    if user.get("plan") == "free":
+        return user
+    raw_device_id = request.headers.get("X-IP-Device-ID", "")
+    if len(raw_device_id) < 20 or len(raw_device_id) > 128:
+        raise HTTPException(status_code=403, detail="Register this device to access paid search.")
+    device_hash = hashlib.sha256(raw_device_id.encode("utf-8")).hexdigest()
+    with db.connect() as con:
+        device = con.execute(
+            "SELECT id FROM user_devices WHERE user_id=? AND device_hash=?",
+            (user["id"], device_hash)
+        ).fetchone()
+        if device:
+            con.execute(
+                "UPDATE user_devices SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?",
+                (device["id"],)
+            )
+    if not device:
+        raise HTTPException(status_code=403, detail="This device is not registered for your membership.")
+    return user
+
+
+def _consume_free_search(user_id: int) -> None:
+    """Atomically consume the single free search allowed per UTC day."""
+    usage_day = datetime.now(timezone.utc).date().isoformat()
+    with db.connect() as con:
+        db.begin_write(con, user_id)
+        row = con.execute(
+            "SELECT search_count FROM search_usage WHERE user_id=? AND usage_date=?",
+            (user_id, usage_day)
+        ).fetchone()
+        if row and int(row["search_count"]) >= 1:
+            raise HTTPException(
+                status_code=429,
+                detail="Your free search has been used for today. Upgrade for full access."
+            )
+        if row:
+            con.execute(
+                "UPDATE search_usage SET search_count=search_count+1, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND usage_date=?",
+                (user_id, usage_day)
+            )
+        else:
+            con.execute(
+                "INSERT INTO search_usage (user_id, usage_date, search_count) VALUES (?, ?, 1)",
+                (user_id, usage_day)
+            )
+
+
+def _free_preview(items):
+    """Return only fields approved for the limited free preview."""
+    allowed = {
+        "id", "kind", "status", "entity_name", "state", "suburb",
+        "postcode", "notice_date", "deadline"
+    }
+    return [{key: value for key, value in item.items() if key in allowed} for item in items]
+
+
+def _require_paid_member(user: dict) -> None:
+    if user.get("plan") not in ("starter", "professional", "business"):
+        raise HTTPException(status_code=403, detail="An active paid subscription is required.")
+
+
+def _require_admin_refresh(request: Request) -> None:
+    expected = os.environ.get("RADAR_ADMIN_KEY", "").strip()
+    supplied = request.headers.get("X-Radar-Admin-Key", "")
+    if not expected or len(expected) < 32 or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Administrator authorization required.")
+
+
+def _require_wp_bridge(request: Request) -> None:
+    """Allow customer credential operations only through the trusted WP bridge."""
+    expected = os.environ.get("IP_WP_BRIDGE_SECRET", "").strip()
+    supplied = request.headers.get("X-IP-Bridge-Key", "")
+    if not expected or len(expected) < 32:
+        raise HTTPException(status_code=503, detail="WordPress membership bridge is not configured.")
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Use the Insolvency Pulse member portal to sign in.")
 
 @app.post("/api/auth/register")
-def register_customer(data: RegisterRequest):
-    """Register a new customer account."""
+def register_customer(data: RegisterRequest, request: Request):
+    """Register a new customer account through the WordPress portal."""
+    _require_wp_bridge(request)
 
     email = str(data.email).strip().lower()
 
@@ -126,8 +239,9 @@ def register_customer(data: RegisterRequest):
 
 
 @app.post("/api/auth/login")
-def login_customer(data: LoginRequest):
-    """Authenticate an existing customer."""
+def login_customer(data: LoginRequest, request: Request):
+    """Authenticate a customer through the WordPress portal."""
+    _require_wp_bridge(request)
 
     email = str(data.email).strip().lower()
 
@@ -623,6 +737,119 @@ async def stripe_webhook(request: Request):
         )
 
     return {"received": True}
+@app.post("/api/devices/register")
+def register_device(
+    data: DeviceRegistrationRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Register a first device per category or email-verify a replacement."""
+    _require_wp_bridge(request)
+    if user["plan"] == "free":
+        return {"status": "not_required", "message": "Device registration applies to paid memberships."}
+
+    user_agent = request.headers.get("X-IP-Device-User-Agent", request.headers.get("User-Agent", "")).lower()
+    device_type = "mobile" if any(term in user_agent for term in ("iphone", "ipad", "android", "mobile")) else "desktop"
+    device_hash = hashlib.sha256(data.device_id.encode("utf-8")).hexdigest()
+    device_label = (data.device_label or ("Mobile device" if device_type == "mobile" else "Desktop/laptop")).strip()[:120]
+
+    with db.connect() as con:
+        db.begin_write(con, user["id"])
+        current = con.execute(
+            "SELECT id, device_hash FROM user_devices WHERE user_id=? AND device_type=?",
+            (user["id"], device_type)
+        ).fetchone()
+        if current and secrets.compare_digest(current["device_hash"], device_hash):
+            con.execute("UPDATE user_devices SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?", (current["id"],))
+            return {"status": "registered", "device_type": device_type}
+        if not current:
+            con.execute(
+                "INSERT INTO user_devices (user_id, device_type, device_hash, device_label) VALUES (?, ?, ?, ?)",
+                (user["id"], device_type, device_hash, device_label)
+            )
+            return {"status": "registered", "device_type": device_type}
+
+        last_change = con.execute(
+            "SELECT changed_at FROM device_change_history WHERE user_id=? ORDER BY changed_at DESC LIMIT 1",
+            (user["id"],)
+        ).fetchone()
+        if last_change:
+            try:
+                last_changed_at = datetime.fromisoformat(str(last_change["changed_at"]).replace("Z", "+00:00"))
+                if last_changed_at.tzinfo is None:
+                    last_changed_at = last_changed_at.replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=503, detail="Device change history requires administrator review.")
+            if datetime.now(timezone.utc) - last_changed_at < timedelta(days=30):
+                raise HTTPException(status_code=429, detail="A device can only be replaced once every 30 days.")
+
+        # Invalidate any older pending verification for this device category.
+        con.execute(
+            "UPDATE device_change_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=? AND device_type=? AND used_at IS NULL",
+            (user["id"], device_type)
+        )
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        con.execute(
+            "INSERT INTO device_change_tokens (user_id, device_type, device_hash, device_label, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user["id"], device_type, device_hash, device_label, token_hash, expires)
+        )
+
+    try:
+        email_service.send_device_change_verification_email(user["email"], raw_token, device_type, device_label)
+    except Exception as exc:
+        print("DEVICE VERIFICATION EMAIL FAILED:", type(exc).__name__, flush=True)
+        raise HTTPException(status_code=503, detail="We could not send the device verification email. Please try again later.")
+    return {"status": "verification_required", "device_type": device_type,
+            "message": "We sent a device replacement verification link to your registered email address."}
+
+
+@app.post("/api/devices/verify")
+def verify_device_change(data: DeviceVerificationRequest, request: Request):
+    _require_wp_bridge(request)
+    token_hash = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    with db.connect() as con:
+        record = con.execute(
+            "SELECT id, user_id, device_type, device_hash, device_label, expires_at, used_at FROM device_change_tokens WHERE token_hash=?",
+            (token_hash,)
+        ).fetchone()
+        if not record or record["used_at"] is not None:
+            raise HTTPException(status_code=400, detail="This device verification link is invalid or has already been used.")
+        try:
+            expires = datetime.fromisoformat(str(record["expires_at"]).replace("Z", "+00:00"))
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="This device verification link is invalid or expired.")
+        if expires < now:
+            raise HTTPException(status_code=400, detail="This device verification link has expired. Please sign in and request a new one.")
+
+        db.begin_write(con, record["user_id"])
+        last_change = con.execute(
+            "SELECT changed_at FROM device_change_history WHERE user_id=? ORDER BY changed_at DESC LIMIT 1",
+            (record["user_id"],)
+        ).fetchone()
+        if last_change:
+            last_changed_at = datetime.fromisoformat(str(last_change["changed_at"]).replace("Z", "+00:00"))
+            if last_changed_at.tzinfo is None:
+                last_changed_at = last_changed_at.replace(tzinfo=timezone.utc)
+            if now - last_changed_at < timedelta(days=30):
+                raise HTTPException(status_code=429, detail="A device can only be replaced once every 30 days.")
+
+        con.execute(
+            "UPDATE user_devices SET device_hash=?, device_label=?, registered_at=CURRENT_TIMESTAMP, last_seen_at=CURRENT_TIMESTAMP WHERE user_id=? AND device_type=?",
+            (record["device_hash"], record["device_label"], record["user_id"], record["device_type"])
+        )
+        con.execute(
+            "INSERT INTO device_change_history (user_id, device_type) VALUES (?, ?)",
+            (record["user_id"], record["device_type"])
+        )
+        con.execute("UPDATE device_change_tokens SET used_at=? WHERE id=?", (now.isoformat(), record["id"]))
+    return {"status": "verified", "message": "Your device replacement is approved. Please sign in again on the new device."}
+
+
 # Customer company watchlist
 
 PLAN_LIMITS = {
@@ -825,13 +1052,19 @@ def leads(
     status: str | None = None,
     q: str | None = None,
     limit: int = Query(200, ge=1, le=20000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_verified_device_user),
 ):
+    is_free = user["plan"] == "free"
+    if is_free:
+        _consume_free_search(user["id"])
+        limit, offset = 5, 0
     with db.connect() as con:
-        return db.search(
+        rows = db.search(
             con, kind=kind, state=state, status=status, q=q,
             limit=limit, offset=offset
         )
+    return _free_preview(rows) if is_free else rows
 
 
 @app.get("/api/leads/page")
@@ -844,10 +1077,10 @@ def leads_page(
     days: int | None = Query(None, ge=1, le=3650),
     q: str | None = None,
     limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_verified_device_user),
 ):
     from datetime import date, timedelta
-    from fastapi import HTTPException
     categories = {
         "L": ("insolvency", "liquidation"),
         "A": ("insolvency", "administration"),
@@ -861,6 +1094,12 @@ def leads_page(
         kind, status = categories[category]
     if dataset not in (None, "", "current", "historical"):
         raise HTTPException(status_code=400, detail="Invalid dataset")
+
+    is_free = user["plan"] == "free"
+    if is_free:
+        _consume_free_search(user["id"])
+        limit, offset = 5, 0
+
     since = (date.today() - timedelta(days=days)).isoformat() if days else None
     with db.connect() as con:
         total = db.count_search(con, kind=kind, state=state, status=status, q=q, since=since, dataset=dataset or None)
@@ -868,11 +1107,16 @@ def leads_page(
             con, kind=kind, state=state, status=status, q=q,
             limit=limit, offset=offset, since=since, dataset=dataset or None
         )
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    if is_free:
+        items = _free_preview(items)
+        total = min(total, 5)
+    return {"items": items, "total": total, "limit": limit, "offset": offset,
+            "has_more": bool(is_free and total >= 5)}
 
 
 @app.get("/api/status")
-def status():
+def status(request: Request):
+    _require_admin_refresh(request)
     return _last
 
 
@@ -882,9 +1126,10 @@ def export(
     state: str | None = None,
     status: str | None = None,
     q: str | None = None,
-    dataset: str | None = None
+    dataset: str | None = None,
+    user: dict = Depends(get_verified_device_user),
 ):
-    from fastapi import HTTPException
+    _require_paid_member(user)
     if dataset not in (None, "", "current", "historical"):
         raise HTTPException(status_code=400, detail="Invalid dataset")
 
@@ -920,7 +1165,8 @@ def export(
     )
 
 @app.post("/api/refresh")
-def refresh():
+def refresh(request: Request):
+    _require_admin_refresh(request)
     return {"ingested": refresh_data()}
 
 
