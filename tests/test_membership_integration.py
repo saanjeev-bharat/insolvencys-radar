@@ -298,7 +298,18 @@ def test_paid_device_registration_and_email_verified_replacement(client, monkeyp
     too_soon = client.post("/api/devices/register", headers=desktop_headers,
                            json={"device_id": "desktop-device-identifier-0003"})
     assert too_soon.status_code == 429
+def test_free_member_search_rejects_unregistered_browser(client):
+    token = create_customer(client)
 
+    response = client.get(
+        "/api/leads/page",
+        headers={
+            "Authorization": "Bearer " + token,
+            "X-IP-Device-ID": "different-unregistered-browser-0001"
+        }
+    )
+
+    assert response.status_code == 403
 
 def test_free_member_device_registration(client):
     token = create_customer(client)
