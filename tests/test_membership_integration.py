@@ -64,7 +64,22 @@ def test_customer_registration_and_login(client):
         }
     )
     assert login.status_code == 200
+def test_same_free_browser_cannot_register_second_account(client):
+    create_customer(client)
 
+    response = client.post(
+        "/api/auth/register",
+        headers={
+            "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+        },
+        json={
+            "email": "second-customer@example.com",
+            "password": "Test-Password-2026",
+            "device_id": "free-device-identifier-0000001"
+        }
+    )
+
+    assert response.status_code == 409
 
 def test_watchlist_add_view_and_remove(client):
     token = create_customer(client)
