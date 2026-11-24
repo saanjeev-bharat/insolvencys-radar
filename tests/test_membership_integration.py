@@ -49,7 +49,8 @@ def test_customer_registration_and_login(client):
         headers={"X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"},
         json={
             "email": "customer@example.com",
-            "password": "Test-Password-2026"
+            "password": "Test-Password-2026",
+            "device_id": "free-device-identifier-0000001"
         }
     )
     assert duplicate.status_code == 409
