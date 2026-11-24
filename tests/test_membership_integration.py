@@ -303,7 +303,10 @@ def test_free_member_device_registration(client):
 
 def test_free_search_returns_at_most_five_records(client):
     token = create_customer(client)
-    headers = {"Authorization": "Bearer " + token}
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
     import db
     with db.connect() as con:
         for number in range(7):
