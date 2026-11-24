@@ -155,7 +155,33 @@ search_usage = Table(
     UniqueConstraint("user_id", "usage_date", name="uq_search_usage_user_day"),
 )
 Index("idx_search_usage_user_day", search_usage.c.user_id, search_usage.c.usage_date)
-
+# Prevent one registered browser identifier from being linked
+# to multiple Free customer accounts.
+free_device_registry = Table(
+    "free_device_registry", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("device_hash", String, nullable=False, unique=True),
+    Column("device_label", String),
+    Column(
+        "registered_at",
+        String,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "last_seen_at",
+        String,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+)
+Index("idx_free_device_registry_user", free_device_registry.c.user_id)
 # One registered desktop/laptop and one registered mobile browser per paid user.
 user_devices = Table(
     "user_devices", metadata,
