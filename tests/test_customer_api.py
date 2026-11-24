@@ -23,9 +23,11 @@ def create_customer(client):
         "/api/auth/register",
         json={
             "email": "customer@example.com",
-            "password": "Test-Password-2026"
+            "password": "Test-Password-2026",
+            "device_id": "test-browser-device-id-0001"
         }
     )
+
     assert response.status_code == 200
     return response.json()["token"]
 
@@ -43,7 +45,8 @@ def test_customer_registration_and_login(client):
         "/api/auth/register",
         json={
             "email": "customer@example.com",
-            "password": "Test-Password-2026"
+            "password": "Test-Password-2026",
+            "device_id": "test-browser-device-id-0001"
         }
     )
     assert duplicate.status_code == 409
