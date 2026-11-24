@@ -5,9 +5,11 @@ on:
   push:
     branches:
       - main
+      - free-membership-protection
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   test:
