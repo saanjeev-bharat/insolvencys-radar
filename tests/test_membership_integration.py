@@ -22,10 +22,13 @@ def client(tmp_path, monkeypatch):
 def create_customer(client):
     response = client.post(
         "/api/auth/register",
-        headers={"X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"},
+        headers={
+            "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+        },
         json={
             "email": "customer@example.com",
-            "password": "Test-Password-2026"
+            "password": "Test-Password-2026",
+            "device_id": "free-device-identifier-0000001"
         }
     )
     assert response.status_code == 200
@@ -46,7 +49,8 @@ def test_customer_registration_and_login(client):
         headers={"X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"},
         json={
             "email": "customer@example.com",
-            "password": "Test-Password-2026"
+            "password": "Test-Password-2026",
+            "device_id": "free-device-identifier-0000001"
         }
     )
     assert duplicate.status_code == 409
@@ -60,7 +64,22 @@ def test_customer_registration_and_login(client):
         }
     )
     assert login.status_code == 200
+def test_same_free_browser_cannot_register_second_account(client):
+    create_customer(client)
 
+    response = client.post(
+        "/api/auth/register",
+        headers={
+            "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+        },
+        json={
+            "email": "second-customer@example.com",
+            "password": "Test-Password-2026",
+            "device_id": "free-device-identifier-0000001"
+        }
+    )
+
+    assert response.status_code == 409
 
 def test_watchlist_add_view_and_remove(client):
     token = create_customer(client)
@@ -164,7 +183,10 @@ def test_company_search_requires_authentication(client):
 
 def test_free_member_gets_five_field_redacted_preview_and_one_search_daily(client):
     token = create_customer(client)
-    headers = {"Authorization": "Bearer " + token}
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
     _insert_test_lead()
 
     first = client.get("/api/leads/page", headers=headers, params={"q": "Preview"})
@@ -182,6 +204,32 @@ def test_free_member_gets_five_field_redacted_preview_and_one_search_daily(clien
 
     bypass = client.get("/api/leads", headers=headers, params={"limit": 20000})
     assert bypass.status_code == 429
+
+
+
+def test_free_member_lifetime_search_limit(client):
+    token = create_customer(client)
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
+
+    import db
+    from datetime import date, timedelta
+
+    with db.connect() as con:
+        for days_ago in range(1, 6):
+            usage_date = (date.today() - timedelta(days=days_ago)).isoformat()
+            con.execute(
+                "INSERT INTO search_usage (user_id, usage_date, search_count) VALUES (?, ?, ?)",
+                (1, usage_date, 1)
+            )
+
+    _insert_test_lead()
+
+    response = client.get("/api/leads/page", headers=headers)
+    assert response.status_code == 429
+
 
 
 def test_free_member_cannot_export_csv(client):
@@ -276,22 +324,41 @@ def test_paid_device_registration_and_email_verified_replacement(client, monkeyp
     too_soon = client.post("/api/devices/register", headers=desktop_headers,
                            json={"device_id": "desktop-device-identifier-0003"})
     assert too_soon.status_code == 429
-
-
-def test_free_members_do_not_need_device_registration(client):
+def test_free_member_search_rejects_unregistered_browser(client):
     token = create_customer(client)
+
+    response = client.get(
+        "/api/leads/page",
+        headers={
+            "Authorization": "Bearer " + token,
+            "X-IP-Device-ID": "different-unregistered-browser-0001"
+        }
+    )
+
+    assert response.status_code == 403
+
+def test_free_member_device_registration(client):
+    token = create_customer(client)
+
     response = client.post(
         "/api/devices/register",
-        headers={"Authorization": "Bearer " + token, "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"},
-        json={"device_id": "free-device-identifier-0000001"},
+        headers={
+            "Authorization": "Bearer " + token,
+            "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+        },
+        json={"device_id": "free-device-identifier-0000001"}
     )
+
     assert response.status_code == 200
     assert response.json()["status"] == "not_required"
 
 
 def test_free_search_returns_at_most_five_records(client):
     token = create_customer(client)
-    headers = {"Authorization": "Bearer " + token}
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
     import db
     with db.connect() as con:
         for number in range(7):
@@ -307,18 +374,30 @@ def test_free_search_returns_at_most_five_records(client):
     assert response.json()["total"] == 5
 
 
+
 def test_expired_paid_subscription_falls_back_to_free(client):
     token = create_customer(client)
-    headers = {"Authorization": "Bearer " + token}
+
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
+
     import db
     from datetime import datetime, timedelta, timezone
-    expired = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    expired = (
+        datetime.now(timezone.utc) - timedelta(days=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     with db.connect() as con:
         con.execute(
             "INSERT INTO subscriptions (user_id, plan, status, current_period_end) VALUES (?, 'business', 'active', ?)",
             (1, expired),
         )
+
     response = client.get("/api/export.csv", headers=headers)
+
     assert response.status_code == 403
     assert response.json()["detail"] == "An active paid subscription is required."
 
