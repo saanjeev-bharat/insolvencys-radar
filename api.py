@@ -31,6 +31,7 @@ security = HTTPBearer(auto_error=False)
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
+    device_id: str | None = None
 
 
 class LoginRequest(BaseModel):
