@@ -121,25 +121,63 @@ def get_verified_device_user(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    """For paid data access, require the registered device cookie identifier."""
-    if user.get("plan") == "free":
-        return user
+    """Verify registered browser for Free members and registered devices for paid members."""
     raw_device_id = request.headers.get("X-IP-Device-ID", "")
+
     if len(raw_device_id) < 20 or len(raw_device_id) > 128:
-        raise HTTPException(status_code=403, detail="Register this device to access paid search.")
+        raise HTTPException(
+            status_code=403,
+            detail="Register this browser to access company search."
+        )
+
     device_hash = hashlib.sha256(raw_device_id.encode("utf-8")).hexdigest()
+
+    if user.get("plan") == "free":
+        with db.connect() as con:
+            device = con.execute(
+                """
+                SELECT user_id
+                FROM free_device_registry
+                WHERE device_hash=?
+                """,
+                (device_hash,)
+            ).fetchone()
+
+            if not device or device["user_id"] != user["id"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This browser is not registered to your Free account."
+                )
+
+            con.execute(
+                """
+                UPDATE free_device_registry
+                SET last_seen_at=CURRENT_TIMESTAMP
+                WHERE device_hash=? AND user_id=?
+                """,
+                (device_hash, user["id"])
+            )
+
+        return user
+
     with db.connect() as con:
         device = con.execute(
             "SELECT id FROM user_devices WHERE user_id=? AND device_hash=?",
             (user["id"], device_hash)
         ).fetchone()
+
         if device:
             con.execute(
                 "UPDATE user_devices SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?",
                 (device["id"],)
             )
+
     if not device:
-        raise HTTPException(status_code=403, detail="This device is not registered for your membership.")
+        raise HTTPException(
+            status_code=403,
+            detail="This device is not registered for your membership."
+        )
+
     return user
 
 
@@ -205,6 +243,15 @@ def register_customer(data: RegisterRequest, request: Request):
     _require_wp_bridge(request)
 
     email = str(data.email).strip().lower()
+    device_id = (data.device_id or "").strip()
+
+    if not device_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Browser registration identifier is required. Please refresh the page and try again."
+        )
+
+    device_hash = hashlib.sha256(device_id.encode("utf-8")).hexdigest()
 
     try:
         password_hash = auth.hash_password(data.password)
@@ -221,10 +268,20 @@ def register_customer(data: RegisterRequest, request: Request):
 
             user_id = inserted[0]
 
+            con.execute(
+                """
+                INSERT INTO free_device_registry (
+                    user_id, device_hash, device_label
+                )
+                VALUES (?, ?, ?)
+                """,
+                (user_id, device_hash, "Free member browser")
+            )
+
     except db.IntegrityError:
         raise HTTPException(
             status_code=409,
-            detail="An account with this email already exists."
+            detail="An account with this email or browser is already registered."
         )
 
     token = auth.create_access_token(user_id, email)
@@ -237,7 +294,6 @@ def register_customer(data: RegisterRequest, request: Request):
             "plan": "free"
         }
     }
-
 
 @app.post("/api/auth/login")
 def login_customer(data: LoginRequest, request: Request):
@@ -746,8 +802,59 @@ def register_device(
 ):
     """Register a first device per category or email-verify a replacement."""
     _require_wp_bridge(request)
-    if user["plan"] == "free":
-        return {"status": "not_required", "message": "Device registration applies to paid memberships."}
+   if user["plan"] == "free":
+    device_id = (data.device_id or "").strip()
+
+    if not device_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Browser device identifier is missing. Please refresh and sign in again."
+        )
+
+    device_hash = hashlib.sha256(device_id.encode("utf-8")).hexdigest()
+    device_label = (data.device_label or "Free member browser").strip()[:120]
+
+    try:
+        with db.connect() as con:
+            db.begin_write(con, user["id"])
+
+            existing = con.execute(
+                "SELECT user_id FROM free_device_registry WHERE device_hash=?",
+                (device_hash,)
+            ).fetchone()
+
+            if existing and existing["user_id"] != user["id"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This browser is already registered to another Free account."
+                )
+
+            if existing:
+                con.execute(
+                    """
+                    UPDATE free_device_registry
+                    SET last_seen_at=CURRENT_TIMESTAMP
+                    WHERE device_hash=? AND user_id=?
+                    """,
+                    (device_hash, user["id"])
+                )
+            else:
+                con.execute(
+                    """
+                    INSERT INTO free_device_registry
+                    (user_id, device_hash, device_label)
+                    VALUES (?, ?, ?)
+                    """,
+                    (user["id"], device_hash, device_label)
+                )
+
+    except db.IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="This browser is already registered to another Free account."
+        )
+
+    return {"status": "registered", "device_type": "free"}
 
     user_agent = request.headers.get("X-IP-Device-User-Agent", request.headers.get("User-Agent", "")).lower()
     device_type = "mobile" if any(term in user_agent for term in ("iphone", "ipad", "android", "mobile")) else "desktop"
