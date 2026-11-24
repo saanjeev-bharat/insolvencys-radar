@@ -1,10 +1,23 @@
+
 import pytest
 from fastapi.testclient import TestClient
 
 
+BRIDGE_HEADERS = {
+    "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+}
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("RADAR_SECRET_KEY", "local-test-secret-key-12345678901234567890")
+    monkeypatch.setenv(
+        "RADAR_SECRET_KEY",
+        "local-test-secret-key-12345678901234567890"
+    )
+    monkeypatch.setenv(
+        "IP_WP_BRIDGE_SECRET",
+        "local-test-wordpress-bridge-secret-1234567890"
+    )
 
     import db
     import api
@@ -21,6 +34,7 @@ def client(tmp_path, monkeypatch):
 def create_customer(client):
     response = client.post(
         "/api/auth/register",
+        headers=BRIDGE_HEADERS,
         json={
             "email": "customer@example.com",
             "password": "Test-Password-2026",
@@ -43,6 +57,7 @@ def test_customer_registration_and_login(client):
 
     duplicate = client.post(
         "/api/auth/register",
+        headers=BRIDGE_HEADERS,
         json={
             "email": "customer@example.com",
             "password": "Test-Password-2026",
@@ -53,6 +68,7 @@ def test_customer_registration_and_login(client):
 
     login = client.post(
         "/api/auth/login",
+        headers=BRIDGE_HEADERS,
         json={
             "email": "customer@example.com",
             "password": "Test-Password-2026"
