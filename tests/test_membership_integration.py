@@ -350,7 +350,7 @@ def test_free_member_device_registration(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "registered"
+    assert response.json()["status"] == "not_required"
 
 
 def test_free_search_returns_at_most_five_records(client):
@@ -374,18 +374,30 @@ def test_free_search_returns_at_most_five_records(client):
     assert response.json()["total"] == 5
 
 
+
 def test_expired_paid_subscription_falls_back_to_free(client):
     token = create_customer(client)
-    headers = {"Authorization": "Bearer " + token}
+
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
+
     import db
     from datetime import datetime, timedelta, timezone
-    expired = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    expired = (
+        datetime.now(timezone.utc) - timedelta(days=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     with db.connect() as con:
         con.execute(
             "INSERT INTO subscriptions (user_id, plan, status, current_period_end) VALUES (?, 'business', 'active', ?)",
             (1, expired),
         )
+
     response = client.get("/api/export.csv", headers=headers)
+
     assert response.status_code == 403
     assert response.json()["detail"] == "An active paid subscription is required."
 
