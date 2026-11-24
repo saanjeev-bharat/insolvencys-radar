@@ -206,6 +206,32 @@ def test_free_member_gets_five_field_redacted_preview_and_one_search_daily(clien
     assert bypass.status_code == 429
 
 
+
+def test_free_member_lifetime_search_limit(client):
+    token = create_customer(client)
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
+
+    import db
+    from datetime import date, timedelta
+
+    with db.connect() as con:
+        for days_ago in range(1, 6):
+            usage_date = (date.today() - timedelta(days=days_ago)).isoformat()
+            con.execute(
+                "INSERT INTO search_usage (user_id, usage_date, search_count) VALUES (?, ?, ?)",
+                (1, usage_date, 1)
+            )
+
+    _insert_test_lead()
+
+    response = client.get("/api/leads/page", headers=headers)
+    assert response.status_code == 429
+
+
+
 def test_free_member_cannot_export_csv(client):
     token = create_customer(client)
     response = client.get("/api/export.csv", headers={"Authorization": "Bearer " + token})
