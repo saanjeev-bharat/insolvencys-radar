@@ -818,6 +818,8 @@ async def stripe_webhook(request: Request):
         )
 
     return {"received": True}
+
+
 @app.post("/api/devices/register")
 def register_device(
     data: DeviceRegistrationRequest,
@@ -826,117 +828,134 @@ def register_device(
 ):
     """Register a first device per category or email-verify a replacement."""
     _require_wp_bridge(request)
-   if user["plan"] == "free":
-    device_id = (data.device_id or "").strip()
 
-    if not device_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Browser device identifier is missing. Please refresh and sign in again."
-        )
+    if user["plan"] == "free":
+        return {
+            "status": "not_required",
+            "message": "Device registration applies to paid memberships."
+        }
 
-    device_hash = hashlib.sha256(device_id.encode("utf-8")).hexdigest()
-    device_label = (data.device_label or "Free member browser").strip()[:120]
+    user_agent = request.headers.get(
+        "X-IP-Device-User-Agent",
+        request.headers.get("User-Agent", "")
+    ).lower()
 
-    try:
-        with db.connect() as con:
-            db.begin_write(con, user["id"])
+    device_type = (
+        "mobile"
+        if any(term in user_agent for term in ("iphone", "ipad", "android", "mobile"))
+        else "desktop"
+    )
 
-            existing = con.execute(
-                "SELECT user_id FROM free_device_registry WHERE device_hash=?",
-                (device_hash,)
-            ).fetchone()
+    device_hash = hashlib.sha256(
+        data.device_id.encode("utf-8")
+    ).hexdigest()
 
-            if existing and existing["user_id"] != user["id"]:
-                raise HTTPException(
-                    status_code=409,
-                    detail="This browser is already registered to another Free account."
-                )
-
-            if existing:
-                con.execute(
-                    """
-                    UPDATE free_device_registry
-                    SET last_seen_at=CURRENT_TIMESTAMP
-                    WHERE device_hash=? AND user_id=?
-                    """,
-                    (device_hash, user["id"])
-                )
-            else:
-                con.execute(
-                    """
-                    INSERT INTO free_device_registry
-                    (user_id, device_hash, device_label)
-                    VALUES (?, ?, ?)
-                    """,
-                    (user["id"], device_hash, device_label)
-                )
-
-    except db.IntegrityError:
-        raise HTTPException(
-            status_code=409,
-            detail="This browser is already registered to another Free account."
-        )
-
-    return {"status": "registered", "device_type": "free"}
-
-    user_agent = request.headers.get("X-IP-Device-User-Agent", request.headers.get("User-Agent", "")).lower()
-    device_type = "mobile" if any(term in user_agent for term in ("iphone", "ipad", "android", "mobile")) else "desktop"
-    device_hash = hashlib.sha256(data.device_id.encode("utf-8")).hexdigest()
-    device_label = (data.device_label or ("Mobile device" if device_type == "mobile" else "Desktop/laptop")).strip()[:120]
+    device_label = (
+        data.device_label
+        or ("Mobile device" if device_type == "mobile" else "Desktop/laptop")
+    ).strip()[:120]
 
     with db.connect() as con:
         db.begin_write(con, user["id"])
+
         current = con.execute(
-            "SELECT id, device_hash FROM user_devices WHERE user_id=? AND device_type=?",
+            "SELECT id, device_hash FROM user_devices "
+            "WHERE user_id=? AND device_type=?",
             (user["id"], device_type)
         ).fetchone()
-        if current and secrets.compare_digest(current["device_hash"], device_hash):
-            con.execute("UPDATE user_devices SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?", (current["id"],))
+
+        if current and secrets.compare_digest(
+            current["device_hash"], device_hash
+        ):
+            con.execute(
+                "UPDATE user_devices SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?",
+                (current["id"],)
+            )
             return {"status": "registered", "device_type": device_type}
+
         if not current:
             con.execute(
-                "INSERT INTO user_devices (user_id, device_type, device_hash, device_label) VALUES (?, ?, ?, ?)",
+                "INSERT INTO user_devices "
+                "(user_id, device_type, device_hash, device_label) "
+                "VALUES (?, ?, ?, ?)",
                 (user["id"], device_type, device_hash, device_label)
             )
             return {"status": "registered", "device_type": device_type}
 
         last_change = con.execute(
-            "SELECT changed_at FROM device_change_history WHERE user_id=? ORDER BY changed_at DESC LIMIT 1",
+            "SELECT changed_at FROM device_change_history "
+            "WHERE user_id=? ORDER BY changed_at DESC LIMIT 1",
             (user["id"],)
         ).fetchone()
+
         if last_change:
             try:
-                last_changed_at = datetime.fromisoformat(str(last_change["changed_at"]).replace("Z", "+00:00"))
+                last_changed_at = datetime.fromisoformat(
+                    str(last_change["changed_at"]).replace("Z", "+00:00")
+                )
                 if last_changed_at.tzinfo is None:
-                    last_changed_at = last_changed_at.replace(tzinfo=timezone.utc)
+                    last_changed_at = last_changed_at.replace(
+                        tzinfo=timezone.utc
+                    )
             except ValueError:
-                raise HTTPException(status_code=503, detail="Device change history requires administrator review.")
-            if datetime.now(timezone.utc) - last_changed_at < timedelta(days=30):
-                raise HTTPException(status_code=429, detail="A device can only be replaced once every 30 days.")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Device change history requires administrator review."
+                )
 
-        # Invalidate any older pending verification for this device category.
+            if datetime.now(timezone.utc) - last_changed_at < timedelta(days=30):
+                raise HTTPException(
+                    status_code=429,
+                    detail="A device can only be replaced once every 30 days."
+                )
+
         con.execute(
-            "UPDATE device_change_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=? AND device_type=? AND used_at IS NULL",
+            "UPDATE device_change_tokens SET used_at=CURRENT_TIMESTAMP "
+            "WHERE user_id=? AND device_type=? AND used_at IS NULL",
             (user["id"], device_type)
         )
+
         raw_token = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-        expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        token_hash = hashlib.sha256(
+            raw_token.encode("utf-8")
+        ).hexdigest()
+
+        expires = (
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        ).isoformat()
+
         con.execute(
-            "INSERT INTO device_change_tokens (user_id, device_type, device_hash, device_label, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user["id"], device_type, device_hash, device_label, token_hash, expires)
+            "INSERT INTO device_change_tokens "
+            "(user_id, device_type, device_hash, device_label, token_hash, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                user["id"], device_type, device_hash,
+                device_label, token_hash, expires
+            )
         )
 
     try:
-        email_service.send_device_change_verification_email(user["email"], raw_token, device_type, device_label)
+        email_service.send_device_change_verification_email(
+            user["email"], raw_token, device_type, device_label
+        )
     except Exception as exc:
-        print("DEVICE VERIFICATION EMAIL FAILED:", type(exc).__name__, flush=True)
-        raise HTTPException(status_code=503, detail="We could not send the device verification email. Please try again later.")
-    return {"status": "verification_required", "device_type": device_type,
-            "message": "We sent a device replacement verification link to your registered email address."}
+        print(
+            "DEVICE VERIFICATION EMAIL FAILED:",
+            type(exc).__name__,
+            flush=True
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="We could not send the device verification email. Please try again later."
+        )
 
+    return {
+        "status": "verification_required",
+        "device_type": device_type,
+        "message": "We sent a device replacement verification link to your registered email address."
+    }
 
+                
 @app.post("/api/devices/verify")
 def verify_device_change(data: DeviceVerificationRequest, request: Request):
     _require_wp_bridge(request)
@@ -990,8 +1009,6 @@ PLAN_LIMITS = {
     "professional": 250,
     "business": 1000,
 }
-
-
 @app.get("/api/watchlist")
 def get_watchlist(user: dict = Depends(get_current_user)):
 
