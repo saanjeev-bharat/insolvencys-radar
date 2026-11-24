@@ -22,10 +22,13 @@ def client(tmp_path, monkeypatch):
 def create_customer(client):
     response = client.post(
         "/api/auth/register",
-        headers={"X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"},
+        headers={
+            "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+        },
         json={
             "email": "customer@example.com",
-            "password": "Test-Password-2026"
+            "password": "Test-Password-2026",
+            "device_id": "free-device-identifier-0000001"
         }
     )
     assert response.status_code == 200
@@ -278,15 +281,20 @@ def test_paid_device_registration_and_email_verified_replacement(client, monkeyp
     assert too_soon.status_code == 429
 
 
-def test_free_members_do_not_need_device_registration(client):
+def test_free_member_device_registration(client):
     token = create_customer(client)
+
     response = client.post(
         "/api/devices/register",
-        headers={"Authorization": "Bearer " + token, "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"},
-        json={"device_id": "free-device-identifier-0000001"},
+        headers={
+            "Authorization": "Bearer " + token,
+            "X-IP-Bridge-Key": "local-test-wordpress-bridge-secret-1234567890"
+        },
+        json={"device_id": "free-device-identifier-0000001"}
     )
+
     assert response.status_code == 200
-    assert response.json()["status"] == "not_required"
+    assert response.json()["status"] == "registered"
 
 
 def test_free_search_returns_at_most_five_records(client):
