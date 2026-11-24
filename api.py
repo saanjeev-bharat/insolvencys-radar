@@ -181,30 +181,54 @@ def get_verified_device_user(
     return user
 
 
+
 def _consume_free_search(user_id: int) -> None:
-    """Atomically consume the single free search allowed per UTC day."""
+    """Atomically enforce five lifetime searches and one search per UTC day."""
     usage_day = datetime.now(timezone.utc).date().isoformat()
+
     with db.connect() as con:
         db.begin_write(con, user_id)
+
+        lifetime_row = con.execute(
+            "SELECT COALESCE(SUM(search_count), 0) AS total "
+            "FROM search_usage WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+
+        lifetime_count = int(lifetime_row["total"] or 0)
+
+        if lifetime_count >= 5:
+            raise HTTPException(
+                status_code=429,
+                detail="Your five free searches have been used. Upgrade for continued access."
+            )
+
         row = con.execute(
-            "SELECT search_count FROM search_usage WHERE user_id=? AND usage_date=?",
+            "SELECT search_count FROM search_usage "
+            "WHERE user_id=? AND usage_date=?",
             (user_id, usage_day)
         ).fetchone()
+
         if row and int(row["search_count"]) >= 1:
             raise HTTPException(
                 status_code=429,
                 detail="Your free search has been used for today. Upgrade for full access."
             )
+
         if row:
             con.execute(
-                "UPDATE search_usage SET search_count=search_count+1, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND usage_date=?",
+                "UPDATE search_usage SET search_count=search_count+1, "
+                "updated_at=CURRENT_TIMESTAMP "
+                "WHERE user_id=? AND usage_date=?",
                 (user_id, usage_day)
             )
         else:
             con.execute(
-                "INSERT INTO search_usage (user_id, usage_date, search_count) VALUES (?, ?, 1)",
+                "INSERT INTO search_usage "
+                "(user_id, usage_date, search_count) VALUES (?, ?, 1)",
                 (user_id, usage_day)
             )
+
 
 
 def _free_preview(items):
