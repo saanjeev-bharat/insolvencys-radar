@@ -168,7 +168,10 @@ def test_company_search_requires_authentication(client):
 
 def test_free_member_gets_five_field_redacted_preview_and_one_search_daily(client):
     token = create_customer(client)
-    headers = {"Authorization": "Bearer " + token}
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-IP-Device-ID": "free-device-identifier-0000001"
+    }
     _insert_test_lead()
 
     first = client.get("/api/leads/page", headers=headers, params={"q": "Preview"})
